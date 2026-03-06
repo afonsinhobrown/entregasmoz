@@ -1,414 +1,354 @@
-import { PrismaClient, VehicleType } from '@prisma/client';
-import { createHash } from 'crypto';
+import { PrismaClient } from '@prisma/client';
+import bcrypt from 'bcryptjs';
 
 const prisma = new PrismaClient();
 
-function hashPassword(password: string): string {
-  return createHash('sha256').update(password).digest('hex');
-}
+// Cidades de Moçambique
+const cities = [
+  // Capitais de Província
+  { name: 'Maputo', province: 'Maputo Cidade', latitude: -25.9653, longitude: 32.5892 },
+  { name: 'Matola', province: 'Maputo Província', latitude: -25.9622, longitude: 32.4589 },
+  { name: 'Xai-Xai', province: 'Gaza', latitude: -25.0519, longitude: 33.6436 },
+  { name: 'Inhambane', province: 'Inhambane', latitude: -23.8650, longitude: 35.3833 },
+  { name: 'Beira', province: 'Sofala', latitude: -19.8436, longitude: 34.8389 },
+  { name: 'Chimoio', province: 'Manica', latitude: -19.1164, longitude: 33.4833 },
+  { name: 'Tete', province: 'Tete', latitude: -16.1564, longitude: 33.5867 },
+  { name: 'Quelimane', province: 'Zambézia', latitude: -17.8786, longitude: 36.8883 },
+  { name: 'Nampula', province: 'Nampula', latitude: -15.1166, longitude: 39.2666 },
+  { name: 'Pemba', province: 'Cabo Delgado', latitude: -12.9776, longitude: 40.5167 },
+  { name: 'Lichinga', province: 'Niassa', latitude: -13.3128, longitude: 35.2422 },
+  
+  // Cidades da Província de Maputo
+  { name: 'Boane', province: 'Maputo Província', latitude: -26.0447, longitude: 32.3333 },
+  { name: 'Namaacha', province: 'Maputo Província', latitude: -26.0167, longitude: 32.0333 },
+  { name: 'Moamba', province: 'Maputo Província', latitude: -25.6000, longitude: 32.2500 },
+  { name: 'Magude', province: 'Maputo Província', latitude: -25.0333, longitude: 32.6500 },
+  { name: 'Manhiça', province: 'Maputo Província', latitude: -25.4117, longitude: 32.8067 },
+  { name: 'Marracuene', province: 'Maputo Província', latitude: -25.7167, longitude: 32.6833 },
+  { name: 'Matutuíne', province: 'Maputo Província', latitude: -26.2000, longitude: 32.8500 },
+  { name: 'Bela Vista', province: 'Maputo Província', latitude: -26.1000, longitude: 32.9000 },
+];
 
-// Coordenadas reais de Maputo
-const LOCAIS = {
-  // Centro de Maputo (Baixa)
-  centro: { latitude: -25.9653, longitude: 32.5892 },
-  // Zimpeto (zona norte de Maputo)
-  zimpeto: { latitude: -25.9047, longitude: 32.5083 },
-  // Costa do Sol (Marginal, leste de Maputo)
-  costaDoSol: { latitude: -25.9658, longitude: 32.5901 },
-  // Polana (zona nobre)
-  polana: { latitude: -25.9615, longitude: 32.5887 },
-  // Malhangalene (zona residencial)
-  malhangalene: { latitude: -25.9489, longitude: 32.5708 },
-  // Sommerschield
-  sommerschield: { latitude: -25.9544, longitude: 32.5989 },
-  // Machava
-  machava: { latitude: -25.9311, longitude: 32.4878 },
-};
+// Licenças padrão
+const licenses = [
+  {
+    name: 'Licença Mensal',
+    type: 'MONTHLY',
+    priceProvider: 1500,
+    priceDelivery: 500,
+    durationDays: 30,
+    description: 'Licença válida por 1 mês',
+  },
+  {
+    name: 'Licença Semestral',
+    type: 'SEMESTRAL',
+    priceProvider: 7500,
+    priceDelivery: 2500,
+    durationDays: 180,
+    description: 'Licença válida por 6 meses - 17% de desconto',
+  },
+  {
+    name: 'Licença Anual',
+    type: 'ANNUAL',
+    priceProvider: 12000,
+    priceDelivery: 4000,
+    durationDays: 365,
+    description: 'Licença válida por 1 ano - 33% de desconto',
+  },
+];
 
 async function main() {
-  console.log('Iniciando seed...');
+  console.log('🌱 Iniciando seed...');
 
-  // Verificar se já existe dados
-  const existingUsers = await prisma.user.count();
-  if (existingUsers > 0) {
-    console.log('Banco já possui dados. Limpando...');
-    await prisma.orderItem.deleteMany();
-    await prisma.order.deleteMany();
-    await prisma.product.deleteMany();
-    await prisma.client.deleteMany();
-    await prisma.deliveryPerson.deleteMany();
-    await prisma.provider.deleteMany();
-    await prisma.user.deleteMany();
-    console.log('Dados limpos.');
+  // Limpar dados existentes
+  console.log('🗑️ Limpando dados existentes...');
+  await prisma.orderItem.deleteMany();
+  await prisma.order.deleteMany();
+  await prisma.rating.deleteMany();
+  await prisma.transaction.deleteMany();
+  await prisma.payment.deleteMany();
+  await prisma.product.deleteMany();
+  await prisma.deliveryFeeConfig.deleteMany();
+  await prisma.license.deleteMany();
+  await prisma.provider.deleteMany();
+  await prisma.deliveryPerson.deleteMany();
+  await prisma.client.deleteMany();
+  await prisma.admin.deleteMany();
+  await prisma.setting.deleteMany();
+  await prisma.city.deleteMany();
+  await prisma.user.deleteMany();
+
+  // Criar cidades
+  console.log('🏙️ Criando cidades...');
+  for (const city of cities) {
+    await prisma.city.create({
+      data: city,
+    });
   }
 
-  // Criar entregadores com localizações reais
-  console.log('Criando entregadores...');
-  
-  // Entregador 1 - Em Zimpeto
-  const deliveryPerson1 = await prisma.user.create({
+  // Criar administrador
+  console.log('👑 Criando administrador...');
+  const adminPassword = await bcrypt.hash('123456', 10);
+  const adminUser = await prisma.user.create({
     data: {
-      name: 'João Silva',
-      email: 'joao@email.com',
-      password: hashPassword('123456'),
-      phone: '+258 84 123 4567',
-      userType: 'DELIVERY_PERSON',
-      deliveryPerson: {
-        create: {
-          vehicleType: VehicleType.MOTORCYCLE,
-          plateNumber: 'MCT-1234',
-          isAvailable: true,
-          currentLatitude: LOCAIS.zimpeto.latitude,
-          currentLongitude: LOCAIS.zimpeto.longitude,
-          rating: 4.8,
-          totalDeliveries: 150,
-        },
-      },
+      name: 'Administrador',
+      email: 'nachingweya@gmail.com',
+      password: adminPassword,
+      phone: '+258 84 000 0000',
+      userType: 'ADMIN',
+    },
+  });
+  await prisma.admin.create({
+    data: {
+      userId: adminUser.id,
     },
   });
 
-  // Entregador 2 - No Costa do Sol
-  const deliveryPerson2 = await prisma.user.create({
-    data: {
-      name: 'Maria Santos',
-      email: 'maria@email.com',
-      password: hashPassword('123456'),
-      phone: '+258 84 765 4321',
-      userType: 'DELIVERY_PERSON',
-      deliveryPerson: {
-        create: {
-          vehicleType: VehicleType.MOTORCYCLE,
-          plateNumber: 'MCT-5678',
-          isAvailable: true,
-          currentLatitude: LOCAIS.costaDoSol.latitude,
-          currentLongitude: LOCAIS.costaDoSol.longitude,
-          rating: 4.9,
-          totalDeliveries: 200,
-        },
-      },
-    },
-  });
-
-  // Entregador 3 - Em Malhangalene
-  const deliveryPerson3 = await prisma.user.create({
-    data: {
-      name: 'Pedro Matsinhe',
-      email: 'pedro@email.com',
-      password: hashPassword('123456'),
-      phone: '+258 84 333 2222',
-      userType: 'DELIVERY_PERSON',
-      deliveryPerson: {
-        create: {
-          vehicleType: VehicleType.BICYCLE,
-          plateNumber: 'BIC-0001',
-          isAvailable: true,
-          currentLatitude: LOCAIS.malhangalene.latitude,
-          currentLongitude: LOCAIS.malhangalene.longitude,
-          rating: 4.7,
-          totalDeliveries: 80,
-        },
-      },
-    },
-  });
-
-  console.log('Entregadores criados:', deliveryPerson1.email, deliveryPerson2.email, deliveryPerson3.email);
-
-  // Criar fornecedores com localizações reais
-  console.log('Criando fornecedores...');
-  
-  // Restaurante Costa do Sol (real!)
-  const provider1 = await prisma.user.create({
-    data: {
-      name: 'Restaurante Costa do Sol',
-      email: 'costasol@email.com',
-      password: hashPassword('123456'),
-      phone: '+258 21 300 100',
-      userType: 'PROVIDER',
-      provider: {
-        create: {
-          storeName: 'Restaurante Costa do Sol',
-          storeDescription: 'Famoso restaurante na Marginal de Maputo. Especialidades: Peixe fresco, Camarão, Lagosta, Piri-piri. Vista para o mar.',
-          category: 'Restaurante',
-          address: 'Av. Marginal, Costa do Sol, Maputo',
-          latitude: LOCAIS.costaDoSol.latitude,
-          longitude: LOCAIS.costaDoSol.longitude,
-          isOpen: true,
-        },
-      },
-    },
-  });
-
-  // Restaurante no centro
-  const provider2 = await prisma.user.create({
-    data: {
-      name: 'Restaurante Sabor Africano',
-      email: 'sabor@email.com',
-      password: hashPassword('123456'),
-      phone: '+258 21 123 456',
-      userType: 'PROVIDER',
-      provider: {
-        create: {
-          storeName: 'Restaurante Sabor Africano',
-          storeDescription: 'Comida tradicional moçambicana. Especialidades: Matapa, Galinha à Zambeziana, Caril de Camarão.',
-          category: 'Restaurante',
-          address: 'Av. Samora Machel, 123, Baixa, Maputo',
-          latitude: LOCAIS.centro.latitude,
-          longitude: LOCAIS.centro.longitude,
-          isOpen: true,
-        },
-      },
-    },
-  });
-
-  // Pizzaria no Polana
-  const provider3 = await prisma.user.create({
-    data: {
-      name: 'Pizzaria Bella Italia',
-      email: 'italia@email.com',
-      password: hashPassword('123456'),
-      phone: '+258 21 654 321',
-      userType: 'PROVIDER',
-      provider: {
-        create: {
-          storeName: 'Pizzaria Bella Italia',
-          storeDescription: 'Pizza autêntica italiana feita em forno a lenha. Massa artesanal e ingredientes importados.',
-          category: 'Pizzaria',
-          address: 'Av. Julius Nyerere, Polana, Maputo',
-          latitude: LOCAIS.polana.latitude,
-          longitude: LOCAIS.polana.longitude,
-          isOpen: true,
-        },
-      },
-    },
-  });
-
-  // Supermercado em Sommerschield
-  const provider4 = await prisma.user.create({
-    data: {
-      name: 'Supermercado Fresco',
-      email: 'fresco@email.com',
-      password: hashPassword('123456'),
-      phone: '+258 21 111 222',
-      userType: 'PROVIDER',
-      provider: {
-        create: {
-          storeName: 'Supermercado Fresco',
-          storeDescription: 'Frutas, legumes e produtos frescos todos os dias. Entrega rápida em toda Maputo.',
-          category: 'Mercado',
-          address: 'Av. Kwame Nkrumah, Sommerschield, Maputo',
-          latitude: LOCAIS.sommerschield.latitude,
-          longitude: LOCAIS.sommerschield.longitude,
-          isOpen: true,
-        },
-      },
-    },
-  });
-
-  console.log('Fornecedores criados:', provider1.email, provider2.email, provider3.email, provider4.email);
-
-  // Buscar os IDs dos providers
-  const provider1Data = await prisma.provider.findFirst({ where: { userId: provider1.id } });
-  const provider2Data = await prisma.provider.findFirst({ where: { userId: provider2.id } });
-  const provider3Data = await prisma.provider.findFirst({ where: { userId: provider3.id } });
-  const provider4Data = await prisma.provider.findFirst({ where: { userId: provider4.id } });
-
-  if (!provider1Data || !provider2Data || !provider3Data || !provider4Data) {
-    throw new Error('Erro ao buscar providers');
+  // Criar licenças
+  console.log('📜 Criando licenças...');
+  for (const license of licenses) {
+    await prisma.license.create({
+      data: license,
+    });
   }
 
-  // Criar produtos para o Costa do Sol
-  console.log('Criando produtos...');
-  await prisma.product.createMany({
-    data: [
-      {
-        providerId: provider1Data.id,
-        name: 'Peixe Grelhado',
-        description: 'Peixe fresco do dia grelhado com molho de limão e alho',
-        price: 450,
-        isAvailable: true,
-      },
-      {
-        providerId: provider1Data.id,
-        name: 'Camarão à Costa do Sol',
-        description: 'Camarões grandes grelhados com molho piri-piri especial',
-        price: 750,
-        isAvailable: true,
-      },
-      {
-        providerId: provider1Data.id,
-        name: 'Lagosta Greelhada',
-        description: 'Lagosta fresca grelhada com manteiga de alho',
-        price: 1200,
-        isAvailable: true,
-      },
-      {
-        providerId: provider1Data.id,
-        name: 'Frango Piri-Piri',
-        description: 'Frango grelhado com molho piri-piri tradicional',
-        price: 350,
-        isAvailable: true,
-      },
-      {
-        providerId: provider1Data.id,
-        name: 'Matapa',
-        description: 'Tradicional matapa de folhas de mandioca com camarão',
-        price: 320,
-        isAvailable: true,
-      },
-    ],
+  // Criar configurações de taxa de entrega
+  console.log('💰 Criando configurações de taxa de entrega...');
+  const maputoCity = await prisma.city.findFirst({
+    where: { name: 'Maputo' },
   });
-
-  // Produtos para o Restaurante Sabor Africano
-  await prisma.product.createMany({
-    data: [
-      {
-        providerId: provider2Data.id,
-        name: 'Matapa',
-        description: 'Tradicional matapa de folhas de mandioca com camarão e leite de coco',
-        price: 350,
-        isAvailable: true,
-      },
-      {
-        providerId: provider2Data.id,
-        name: 'Galinha à Zambeziana',
-        description: 'Frango grelhado com molho piri-piri e acompanhamentos',
-        price: 420,
-        isAvailable: true,
-      },
-      {
-        providerId: provider2Data.id,
-        name: 'Camarão Grelhado',
-        description: 'Camarões frescos grelhados com manteiga de alho',
-        price: 650,
-        isAvailable: true,
-      },
-      {
-        providerId: provider2Data.id,
-        name: 'Xima',
-        description: 'Pasta de milho tradicional moçambicana',
-        price: 50,
-        isAvailable: true,
-      },
-      {
-        providerId: provider2Data.id,
-        name: 'Coca-Cola 500ml',
-        description: 'Refrigerante Coca-Cola gelado',
-        price: 60,
-        isAvailable: true,
-      },
-    ],
-  });
-
-  // Produtos para a Pizzaria
-  await prisma.product.createMany({
-    data: [
-      {
-        providerId: provider3Data.id,
-        name: 'Pizza Margherita',
-        description: 'Molho de tomate, mozzarella fresca e manjericão',
-        price: 380,
-        isAvailable: true,
-      },
-      {
-        providerId: provider3Data.id,
-        name: 'Pizza Quattro Formaggi',
-        description: 'Mozzarella, gorgonzola, parmesão e queijo de cabra',
-        price: 450,
-        isAvailable: true,
-      },
-      {
-        providerId: provider3Data.id,
-        name: 'Pizza Pepperoni',
-        description: 'Molho de tomate, mozzarella e pepperoni',
-        price: 420,
-        isAvailable: true,
-      },
-      {
-        providerId: provider3Data.id,
-        name: 'Calzone',
-        description: 'Pizza fechada recheada com presunto, queijo e cogumelos',
-        price: 400,
-        isAvailable: true,
-      },
-    ],
-  });
-
-  // Produtos para o Supermercado
-  await prisma.product.createMany({
-    data: [
-      {
-        providerId: provider4Data.id,
-        name: 'Cesta de Frutas',
-        description: 'Mix de frutas frescas da estação (maçã, banana, laranja, manga)',
-        price: 250,
-        isAvailable: true,
-      },
-      {
-        providerId: provider4Data.id,
-        name: 'Legumes Sortidos',
-        description: 'Kit com tomate, alface, cenoura, cebola e batata',
-        price: 180,
-        isAvailable: true,
-      },
-      {
-        providerId: provider4Data.id,
-        name: 'Pão Caseiro',
-        description: 'Pão artesanal recém-assado',
-        price: 80,
-        isAvailable: true,
-      },
-      {
-        providerId: provider4Data.id,
-        name: 'Ovos (dúzia)',
-        description: 'Ovos frescos de galinha caipira',
-        price: 150,
-        isAvailable: true,
-      },
-    ],
-  });
-
-  // Criar cliente no centro
-  console.log('Criando cliente...');
-  const client = await prisma.user.create({
+  
+  await prisma.deliveryFeeConfig.create({
     data: {
-      name: 'Ana Costa',
-      email: 'ana@email.com',
-      password: hashPassword('123456'),
-      phone: '+258 84 999 8888',
+      cityId: maputoCity?.id,
+      baseFee: 50,
+      perKmFee: 20,
+      minFee: 50,
+      maxDistance: 20,
+      platformCommissionPercent: 10,
+    },
+  });
+
+  // Configuração global (fallback)
+  await prisma.deliveryFeeConfig.create({
+    data: {
+      baseFee: 50,
+      perKmFee: 20,
+      minFee: 50,
+      maxDistance: 20,
+      platformCommissionPercent: 10,
+    },
+  });
+
+  // Criar configurações gerais
+  console.log('⚙️ Criando configurações...');
+  await prisma.setting.createMany({
+    data: [
+      { key: 'mpesa_number', value: '+258 84 000 0001', description: 'Número M-Pesa para pagamentos' },
+      { key: 'emola_number', value: '+258 86 000 0001', description: 'Número e-Mola para pagamentos' },
+      { key: 'premium_monthly_fee', value: '500', description: 'Taxa mensal para destaque premium (MT)' },
+      { key: 'platform_name', value: 'EntregasMoz', description: 'Nome da plataforma' },
+      { key: 'support_phone', value: '+258 84 000 0000', description: 'Telefone de suporte' },
+      { key: 'support_email', value: 'suporte@entregasmoz.co.mz', description: 'Email de suporte' },
+    ],
+  });
+
+  // Criar usuário cliente de exemplo
+  console.log('👤 Criando cliente de exemplo...');
+  const clientPassword = await bcrypt.hash('123456', 10);
+  const clientUser = await prisma.user.create({
+    data: {
+      name: 'Cliente Teste',
+      email: 'cliente@teste.com',
+      password: clientPassword,
+      phone: '+258 84 111 1111',
       userType: 'CLIENT',
-      client: {
-        create: {
-          address: 'Av. 25 de Setembro, 100, Baixa, Maputo',
-          latitude: LOCAIS.centro.latitude,
-          longitude: LOCAIS.centro.longitude,
-        },
-      },
+    },
+  });
+  await prisma.client.create({
+    data: {
+      userId: clientUser.id,
+      address: 'Av. Julius Nyerere, Maputo',
+      latitude: -25.9653,
+      longitude: 32.5892,
+      cityId: maputoCity?.id,
     },
   });
 
-  console.log('Cliente criado:', client.email);
+  // Criar prestadores de exemplo com licença
+  console.log('🏪 Criando prestadores de exemplo...');
+  const annualLicense = await prisma.license.findFirst({
+    where: { type: 'ANNUAL' },
+  });
+  
+  const providers = [
+    {
+      name: 'Restaurante Zimpeto',
+      email: 'zimpeto@restaurante.co.mz',
+      storeName: 'Restaurante Zimpeto',
+      category: 'Restaurante',
+      address: 'Zimpeto, Maputo',
+      latitude: -25.9047,
+      longitude: 32.5083,
+    },
+    {
+      name: 'Pizzaria Costa do Sol',
+      email: 'costasol@pizzaria.co.mz',
+      storeName: 'Pizzaria Costa do Sol',
+      category: 'Pizzaria',
+      address: 'Costa do Sol, Maputo',
+      latitude: -25.9658,
+      longitude: 32.5901,
+    },
+    {
+      name: 'Mercado Polana',
+      email: 'polana@mercado.co.mz',
+      storeName: 'Mercado Polana',
+      category: 'Mercado',
+      address: 'Polana, Maputo',
+      latitude: -25.9700,
+      longitude: 32.5800,
+    },
+    {
+      name: 'Restaurante Malhangalene',
+      email: 'malhangalene@restaurante.co.mz',
+      storeName: 'Restaurante Malhangalene',
+      category: 'Restaurante',
+      address: 'Malhangalene, Maputo',
+      latitude: -25.9450,
+      longitude: 32.5600,
+    },
+  ];
 
-  console.log('\n✅ Seed concluído com sucesso!\n');
-  console.log('═══════════════════════════════════════════');
-  console.log('📋 CONTAS DE TESTE (senha: 123456)');
-  console.log('═══════════════════════════════════════════');
-  console.log('\n👤 CLIENTES:');
-  console.log('   ana@email.com (Baixa, Maputo)');
-  console.log('\n🏍️ ENTREGADORES:');
-  console.log('   joao@email.com (Zimpeto)');
-  console.log('   maria@email.com (Costa do Sol)');
-  console.log('   pedro@email.com (Malhangalene)');
-  console.log('\n🏪 FORNECEDORES:');
-  console.log('   costasol@email.com (Costa do Sol)');
-  console.log('   sabor@email.com (Baixa)');
-  console.log('   italia@email.com (Polana)');
-  console.log('   fresco@email.com (Sommerschield)');
-  console.log('═══════════════════════════════════════════\n');
+  for (let i = 0; i < providers.length; i++) {
+    const p = providers[i];
+    const providerPassword = await bcrypt.hash('123456', 10);
+    const providerUser = await prisma.user.create({
+      data: {
+        name: p.name,
+        email: p.email,
+        password: providerPassword,
+        phone: `+258 84 222 000${i}`,
+        userType: 'PROVIDER',
+      },
+    });
+    
+    const licenseExpiresAt = new Date();
+    licenseExpiresAt.setFullYear(licenseExpiresAt.getFullYear() + 1);
+    
+    await prisma.provider.create({
+      data: {
+        userId: providerUser.id,
+        storeName: p.storeName,
+        category: p.category,
+        address: p.address,
+        latitude: p.latitude,
+        longitude: p.longitude,
+        isOpen: true,
+        licenseId: annualLicense?.id,
+        licenseExpiresAt: licenseExpiresAt,
+        cityId: maputoCity?.id,
+      },
+    });
+  }
+
+  // Criar produtos para cada prestador
+  console.log('🍽️ Criando produtos de exemplo...');
+  const allProviders = await prisma.provider.findMany();
+  
+  const productsByCategory: Record<string, Array<{name: string, description: string, price: number}>> = {
+    'Restaurante': [
+      { name: 'Frango Grelhado', description: 'Frango grelhado com batata frita', price: 350 },
+      { name: 'Peixe Frito', description: 'Peixe frito com arroz e salada', price: 400 },
+      { name: 'Carne de Porco', description: 'Carne de porco estufada', price: 380 },
+      { name: 'Coca-Cola 350ml', description: 'Refrigerante Coca-Cola', price: 50 },
+      { name: 'Água Mineral 500ml', description: 'Água mineral natural', price: 30 },
+    ],
+    'Pizzaria': [
+      { name: 'Pizza Margherita', description: 'Pizza com molho de tomate e mozzarella', price: 450 },
+      { name: 'Pizza Calabresa', description: 'Pizza com calabresa e cebola', price: 500 },
+      { name: 'Pizza Quatro Queijos', description: 'Pizza com 4 tipos de queijo', price: 550 },
+      { name: 'Pizza Portuguesa', description: 'Pizza com presunto, ovo e cebola', price: 520 },
+      { name: 'Coca-Cola 350ml', description: 'Refrigerante Coca-Cola', price: 50 },
+    ],
+    'Mercado': [
+      { name: 'Pão 10 unidades', description: 'Pão fresco do dia', price: 80 },
+      { name: 'Leite 1L', description: 'Leite fresco pasteurizado', price: 90 },
+      { name: 'Ovos 12 unidades', description: 'Ovos frescos', price: 150 },
+      { name: 'Arroz 1kg', description: 'Arroz tipo 1', price: 80 },
+      { name: 'Açúcar 1kg', description: 'Açúcar cristal', price: 70 },
+    ],
+  };
+
+  for (const provider of allProviders) {
+    const products = productsByCategory[provider.category || 'Restaurante'] || productsByCategory['Restaurante'];
+    for (const product of products) {
+      await prisma.product.create({
+        data: {
+          providerId: provider.id,
+          name: product.name,
+          description: product.description,
+          price: product.price,
+          isAvailable: true,
+        },
+      });
+    }
+  }
+
+  // Criar entregadores de exemplo com licença
+  console.log('🏍️ Criando entregadores de exemplo...');
+  const deliveryLocations = [
+    { lat: -25.9100, lng: 32.5200 }, // Zimpeto
+    { lat: -25.9700, lng: 32.5900 }, // Costa do Sol
+    { lat: -25.9500, lng: 32.5700 }, // Polana
+  ];
+
+  for (let i = 0; i < 3; i++) {
+    const deliveryPassword = await bcrypt.hash('123456', 10);
+    const deliveryUser = await prisma.user.create({
+      data: {
+        name: `Entregador ${i + 1}`,
+        email: `entregador${i + 1}@teste.com`,
+        password: deliveryPassword,
+        phone: `+258 84 333 000${i}`,
+        userType: 'DELIVERY_PERSON',
+      },
+    });
+    
+    const licenseExpiresAt = new Date();
+    licenseExpiresAt.setFullYear(licenseExpiresAt.getFullYear() + 1);
+    
+    await prisma.deliveryPerson.create({
+      data: {
+        userId: deliveryUser.id,
+        vehicleType: i === 0 ? 'MOTORCYCLE' : i === 1 ? 'BICYCLE' : 'MOTORCYCLE',
+        plateNumber: `MG-${1000 + i}-MF`,
+        isAvailable: i === 0, // Só o primeiro está disponível por padrão
+        currentLatitude: deliveryLocations[i].lat,
+        currentLongitude: deliveryLocations[i].lng,
+        rating: 4.5 + (i * 0.1),
+        totalDeliveries: 10 + (i * 5),
+        licenseId: annualLicense?.id,
+        licenseExpiresAt: licenseExpiresAt,
+        cityId: maputoCity?.id,
+      },
+    });
+  }
+
+  console.log('✅ Seed concluído com sucesso!');
+  console.log('');
+  console.log('📋 Resumo:');
+  console.log(`  - ${cities.length} cidades criadas`);
+  console.log(`  - 1 administrador (nachingweya@gmail.com / 123456)`);
+  console.log(`  - ${licenses.length} licenças configuradas`);
+  console.log(`  - ${allProviders.length} prestadores de exemplo`);
+  console.log(`  - 3 entregadores de exemplo`);
+  console.log(`  - 1 cliente de exemplo (cliente@teste.com / 123456)`);
 }
 
 main()
   .catch((e) => {
-    console.error('Erro no seed:', e);
+    console.error('❌ Erro no seed:', e);
     process.exit(1);
   })
   .finally(async () => {

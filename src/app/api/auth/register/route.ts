@@ -1,10 +1,6 @@
 import { db } from '@/lib/db';
-import { hash } from 'crypto';
+import bcrypt from 'bcryptjs';
 import { NextResponse } from 'next/server';
-
-function hashPassword(password: string): string {
-  return hash('sha256', password);
-}
 
 export async function POST(request: Request) {
   try {
@@ -23,13 +19,16 @@ export async function POST(request: Request) {
       );
     }
 
+    // Hash password with bcrypt
+    const hashedPassword = await bcrypt.hash(password, 10);
+
     // Create user with transaction
     const user = await db.$transaction(async (tx) => {
       const newUser = await tx.user.create({
         data: {
           name,
           email,
-          password: hashPassword(password),
+          password: hashedPassword,
           phone,
           userType,
         },
@@ -43,6 +42,7 @@ export async function POST(request: Request) {
             address: additionalData.address,
             latitude: additionalData.latitude || -25.9653,
             longitude: additionalData.longitude || 32.5892,
+            cityId: additionalData.cityId,
           },
         });
       } else if (userType === 'DELIVERY_PERSON') {
@@ -53,6 +53,7 @@ export async function POST(request: Request) {
             plateNumber: additionalData.plateNumber,
             currentLatitude: -25.9653,
             currentLongitude: 32.5892,
+            cityId: additionalData.cityId,
           },
         });
       } else if (userType === 'PROVIDER') {
@@ -65,6 +66,7 @@ export async function POST(request: Request) {
             address: additionalData.storeAddress,
             latitude: additionalData.latitude || -25.9653,
             longitude: additionalData.longitude || 32.5892,
+            cityId: additionalData.cityId,
           },
         });
       }
@@ -72,8 +74,19 @@ export async function POST(request: Request) {
       return newUser;
     });
 
+    // Fetch user with relations
+    const userWithRelations = await db.user.findUnique({
+      where: { id: user.id },
+      include: {
+        client: true,
+        deliveryPerson: true,
+        provider: true,
+        admin: true,
+      },
+    });
+
     // Return user without password
-    const { password: _, ...userWithoutPassword } = user;
+    const { password: _, ...userWithoutPassword } = userWithRelations;
     return NextResponse.json({ user: userWithoutPassword });
   } catch (error) {
     console.error('Registration error:', error);
