@@ -28,7 +28,7 @@ type UserType = 'CLIENT' | 'DELIVERY_PERSON' | 'PROVIDER' | 'ADMIN'
 type OrderStatus = 'PENDING' | 'CONFIRMED' | 'PREPARING' | 'READY' | 'PICKED_UP' | 'DELIVERED' | 'CANCELLED'
 type VehicleType = 'MOTORCYCLE' | 'BICYCLE' | 'CAR' | 'SCOOTER'
 type PaymentMethod = 'MPESA' | 'EMOLA' | 'VISA' | 'MANUAL' | 'CASH'
-type LicenseType = 'MONTHLY' | 'SEMESTRAL' | 'ANNUAL'
+type LicenseType = 'TRIAL' | 'STARTER' | 'GROW' | 'PRO' | 'BASIC' | 'ACTIVE' | 'TOP' | 'MONTHLY' | 'SEMESTRAL' | 'ANNUAL'
 
 interface User {
   id: string
@@ -275,6 +275,13 @@ const paymentMethodLabels: Record<PaymentMethod, string> = {
 }
 
 const licenseTypeLabels: Record<LicenseType, string> = {
+  TRIAL: 'Trial (10 dias)',
+  STARTER: 'Starter',
+  GROW: 'Grow',
+  PRO: 'Pro',
+  BASIC: 'Básico',
+  ACTIVE: 'Ativo',
+  TOP: 'Top',
   MONTHLY: 'Mensal (30 dias)',
   SEMESTRAL: 'Semestral (180 dias)',
   ANNUAL: 'Anual (365 dias)',
@@ -1277,31 +1284,57 @@ function DeliveryPersonTracker({ user, cities, onLicenseRenew }: { user: User; c
 
       {/* License Payment Modal */}
       <Dialog open={showLicenseModal} onOpenChange={setShowLicenseModal}>
-        <DialogContent className="max-w-md max-h-[90vh] overflow-y-auto">
+        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle className="text-xl">📜 Renovar Licença</DialogTitle>
-            <DialogDescription>Escolha um plano para continuar operando</DialogDescription>
+            <DialogTitle className="text-xl">📜 Planos para Entregadores</DialogTitle>
+            <DialogDescription>Escolha o melhor plano para suas entregas</DialogDescription>
           </DialogHeader>
-          <div className="space-y-3">
-            {licenses.filter(l => l.isActive).map((license) => (
-              <Card key={license.id} className="cursor-pointer hover:border-green-500 transition-colors" onClick={() => {
-                setShowLicenseModal(false)
-                // Open payment modal with selected license
-              }}>
-                <CardContent className="p-4">
-                  <div className="flex justify-between items-start">
-                    <div>
-                      <p className="font-bold">{license.name}</p>
-                      <p className="text-sm text-gray-500">{licenseTypeLabels[license.type]}</p>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            {licenses
+              .filter(l => l.isActive && !l.isTrial && (l.targetUserType === 'DELIVERY_PERSON' || l.targetUserType === 'BOTH') && ['BASIC', 'ACTIVE', 'TOP'].includes(l.type))
+              .sort((a, b) => a.priceDelivery - b.priceDelivery)
+              .map((license) => (
+                <Card 
+                  key={license.id} 
+                  className="cursor-pointer transition-all hover:shadow-lg border"
+                  onClick={() => {
+                    setShowLicenseModal(false)
+                    // Open payment modal with selected license
+                  }}
+                >
+                  <CardHeader className="pb-2">
+                    <CardTitle className="text-lg text-center">{license.name}</CardTitle>
+                    <div className="text-center">
+                      <p className="text-2xl font-bold text-green-600">{license.priceDelivery.toLocaleString('pt-MZ')} MT</p>
+                      <p className="text-xs text-gray-500">/mês</p>
                     </div>
-                    <div className="text-right">
-                      <p className="font-bold text-green-600">{license.priceDelivery.toLocaleString('pt-MZ')} MT</p>
-                      <p className="text-xs text-gray-500">{license.durationDays} dias</p>
+                  </CardHeader>
+                  <CardContent className="space-y-2 text-sm">
+                    <div className="flex justify-between py-1 border-b">
+                      <span className="text-gray-500">Taxa por Entrega</span>
+                      <span className="font-medium">{license.transactionFeePercent || 5}%</span>
                     </div>
-                  </div>
-                </CardContent>
-              </Card>
-            ))}
+                    <div className="flex justify-between py-1 border-b">
+                      <span className="text-gray-500">Entregas Incluídas</span>
+                      <span className="font-medium">{license.deliveriesIncluded || '∞'}/mês</span>
+                    </div>
+                    <div className="pt-2 space-y-1">
+                      {license.hasPriority && (
+                        <p className="text-green-600 text-xs">✓ Prioridade em pedidos</p>
+                      )}
+                      {license.hasInsurance && (
+                        <p className="text-green-600 text-xs">✓ Seguro por entrega</p>
+                      )}
+                      {license.hasVerifiedBadge && (
+                        <p className="text-green-600 text-xs">✓ Badge verificado</p>
+                      )}
+                      {!license.hasPriority && !license.hasInsurance && !license.hasVerifiedBadge && (
+                        <p className="text-gray-400 text-xs">Recursos básicos</p>
+                      )}
+                    </div>
+                  </CardContent>
+                </Card>
+              ))}
           </div>
         </DialogContent>
       </Dialog>
@@ -1325,6 +1358,13 @@ function AdminDashboard({ user, onRefresh }: { user: User; onRefresh: () => void
   const [showSettingsModal, setShowSettingsModal] = useState(false)
   const [showFeeConfigModal, setShowFeeConfigModal] = useState(false)
   const [editingFeeConfig, setEditingFeeConfig] = useState<DeliveryFeeConfig | null>(null)
+  // TRIAL management states
+  const [usersWithoutLicense, setUsersWithoutLicense] = useState<User[]>([])
+  const [showTrialModal, setShowTrialModal] = useState(false)
+  const [selectedTrialUser, setSelectedTrialUser] = useState<User | null>(null)
+  const [trialIsFree, setTrialIsFree] = useState(true)
+  const [trialPrice, setTrialPrice] = useState(0)
+  const [creatingTrial, setCreatingTrial] = useState(false)
 
   useEffect(() => {
     const loadData = async () => {
@@ -1432,6 +1472,60 @@ function AdminDashboard({ user, onRefresh }: { user: User; onRefresh: () => void
     }
   }
 
+  // Load users without license
+  const loadUsersWithoutLicense = async () => {
+    try {
+      const res = await fetch('/api/admin?action=usersWithoutLicense')
+      const data = await res.json()
+      setTimeout(() => setUsersWithoutLicense(data.users || []), 0)
+    } catch (error) {
+      console.error('Error loading users without license:', error)
+    }
+  }
+
+  // Create TRIAL license
+  const createTrialLicense = async () => {
+    if (!selectedTrialUser) return
+    setCreatingTrial(true)
+    try {
+      const res = await fetch('/api/admin', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'createTrial',
+          data: {
+            userId: selectedTrialUser.id,
+            isFree: trialIsFree,
+            price: trialIsFree ? 0 : trialPrice,
+          },
+        }),
+      })
+      const data = await res.json()
+      if (data.success) {
+        setShowTrialModal(false)
+        setSelectedTrialUser(null)
+        setTrialIsFree(true)
+        setTrialPrice(0)
+        loadUsersWithoutLicense()
+        onRefresh()
+        alert(`Licença TRIAL criada com sucesso! Expira em 10 dias.`)
+      } else {
+        alert(data.error || 'Erro ao criar licença TRIAL')
+      }
+    } catch (error) {
+      console.error('Error creating TRIAL:', error)
+      alert('Erro ao criar licença TRIAL')
+    }
+    setCreatingTrial(false)
+  }
+
+  // Load users without license when tab changes
+  useEffect(() => {
+    if (adminTab === 'trials') {
+      loadUsersWithoutLicense()
+    }
+  }, [adminTab])
+
   if (loading) {
     return <Card><CardContent className="py-8 text-center"><p>Carregando...</p></CardContent></Card>
   }
@@ -1444,6 +1538,7 @@ function AdminDashboard({ user, onRefresh }: { user: User; onRefresh: () => void
           { id: 'dashboard', label: '📊 Dashboard', icon: '📊' },
           { id: 'users', label: '👥 Usuários', icon: '👥' },
           { id: 'licenses', label: '📜 Licenças', icon: '📜' },
+          { id: 'trials', label: '🎁 Gerenciar TRIAL', icon: '🎁' },
           { id: 'payments', label: '💳 Pagamentos', icon: '💳' },
           { id: 'settings', label: '⚙️ Configurações', icon: '⚙️' },
           { id: 'fees', label: '🚚 Taxas de Entrega', icon: '🚚' },
@@ -1568,6 +1663,62 @@ function AdminDashboard({ user, onRefresh }: { user: User; onRefresh: () => void
                 </div>
               ))}
             </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* TRIAL Management Tab */}
+      {adminTab === 'trials' && (
+        <Card>
+          <CardHeader>
+            <CardTitle>🎁 Gerenciar Licenças TRIAL</CardTitle>
+            <CardDescription>Crie licenças trial de 10 dias para usuários sem licença ativa</CardDescription>
+          </CardHeader>
+          <CardContent>
+            {usersWithoutLicense.length === 0 ? (
+              <p className="text-center text-gray-500 py-8">Todos os usuários têm licença ativa</p>
+            ) : (
+              <div className="max-h-96 overflow-y-auto space-y-3">
+                {usersWithoutLicense.map(u => (
+                  <div key={u.id} className="flex items-center justify-between p-4 bg-gray-50 rounded-lg">
+                    <div className="flex items-center gap-3">
+                      <div className="w-10 h-10 bg-gradient-to-br from-orange-400 to-red-400 rounded-full flex items-center justify-center text-white font-bold">
+                        {u.name.charAt(0).toUpperCase()}
+                      </div>
+                      <div>
+                        <p className="font-medium">{u.name}</p>
+                        <p className="text-xs text-gray-500">{u.email}</p>
+                        <div className="flex items-center gap-2 mt-1">
+                          <Badge className={u.provider ? 'bg-orange-500' : 'bg-green-500'}>
+                            {u.provider ? '🏪 Prestador' : '🏍️ Entregador'}
+                          </Badge>
+                          {u.provider?.licenseExpiresAt && (
+                            <span className="text-xs text-red-500">
+                              Expirou: {new Date(u.provider.licenseExpiresAt).toLocaleDateString('pt-MZ')}
+                            </span>
+                          )}
+                          {u.deliveryPerson?.licenseExpiresAt && (
+                            <span className="text-xs text-red-500">
+                              Expirou: {new Date(u.deliveryPerson.licenseExpiresAt).toLocaleDateString('pt-MZ')}
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                    <Button 
+                      size="sm" 
+                      className="bg-gradient-to-r from-green-500 to-emerald-600"
+                      onClick={() => {
+                        setSelectedTrialUser(u)
+                        setShowTrialModal(true)
+                      }}
+                    >
+                      Criar Trial
+                    </Button>
+                  </div>
+                ))}
+              </div>
+            )}
           </CardContent>
         </Card>
       )}
@@ -1806,6 +1957,100 @@ function AdminDashboard({ user, onRefresh }: { user: User; onRefresh: () => void
           )}
         </DialogContent>
       </Dialog>
+
+      {/* TRIAL Creation Modal */}
+      <Dialog open={showTrialModal} onOpenChange={setShowTrialModal}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>🎁 Criar Licença TRIAL</DialogTitle>
+            <DialogDescription>Criar licença de 10 dias para o usuário</DialogDescription>
+          </DialogHeader>
+          {selectedTrialUser && (
+            <div className="space-y-4">
+              <div className="p-4 bg-gray-50 rounded-lg">
+                <div className="flex items-center gap-3">
+                  <div className="w-12 h-12 bg-gradient-to-br from-orange-400 to-red-400 rounded-full flex items-center justify-center text-white font-bold text-xl">
+                    {selectedTrialUser.name.charAt(0).toUpperCase()}
+                  </div>
+                  <div>
+                    <p className="font-bold">{selectedTrialUser.name}</p>
+                    <p className="text-sm text-gray-500">{selectedTrialUser.email}</p>
+                    <Badge className={selectedTrialUser.provider ? 'bg-orange-500 mt-1' : 'bg-green-500 mt-1'}>
+                      {selectedTrialUser.provider ? '🏪 Prestador' : '🏍️ Entregador'}
+                    </Badge>
+                  </div>
+                </div>
+              </div>
+              
+              <div className="p-3 bg-blue-50 rounded-lg border border-blue-200">
+                <p className="text-sm text-blue-800">
+                  <strong>Duração:</strong> 10 dias<br/>
+                  <strong>Expira em:</strong> {new Date(Date.now() + 10 * 24 * 60 * 60 * 1000).toLocaleDateString('pt-MZ')}
+                </p>
+              </div>
+
+              <div className="space-y-3">
+                <Label>Tipo de Trial</Label>
+                <div className="flex gap-2">
+                  <Button 
+                    variant={trialIsFree ? 'default' : 'outline'}
+                    className={`flex-1 ${trialIsFree ? 'bg-green-500' : ''}`}
+                    onClick={() => {
+                      setTimeout(() => {
+                        setTrialIsFree(true)
+                        setTrialPrice(0)
+                      }, 0)
+                    }}
+                  >
+                    🆓 Gratuito
+                  </Button>
+                  <Button 
+                    variant={!trialIsFree ? 'default' : 'outline'}
+                    className={`flex-1 ${!trialIsFree ? 'bg-orange-500' : ''}`}
+                    onClick={() => setTimeout(() => setTrialIsFree(false), 0)}
+                  >
+                    💰 Pago
+                  </Button>
+                </div>
+              </div>
+
+              {!trialIsFree && (
+                <div className="space-y-2">
+                  <Label>Valor do Trial (MT)</Label>
+                  <Input 
+                    type="number"
+                    value={trialPrice}
+                    onChange={e => setTrialPrice(parseFloat(e.target.value) || 0)}
+                    placeholder="Valor em MT"
+                  />
+                </div>
+              )}
+
+              <div className="flex gap-2">
+                <Button 
+                  variant="outline" 
+                  className="flex-1" 
+                  onClick={() => {
+                    setShowTrialModal(false)
+                    setSelectedTrialUser(null)
+                    setTrialIsFree(true)
+                    setTrialPrice(0)
+                  }}
+                >
+                  Cancelar
+                </Button>
+                <Button 
+                  className="flex-1 bg-gradient-to-r from-green-500 to-emerald-600"
+                  onClick={createTrialLicense}
+                  disabled={creatingTrial || (!trialIsFree && trialPrice <= 0)}
+                >
+                  {creatingTrial ? 'Criando...' : 'Criar Trial de 10 dias'}
+                </Button>
+              </div>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }
@@ -2005,59 +2250,82 @@ function ProviderDashboard({ user, providers, onRefresh }: { user: User; provide
 
       {/* License Modal */}
       <Dialog open={showLicenseModal} onOpenChange={setShowLicenseModal}>
-        <DialogContent className="max-w-md max-h-[90vh] overflow-y-auto">
+        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle>📜 Renovar Licença</DialogTitle>
-            <DialogDescription>Escolha um plano para sua loja</DialogDescription>
+            <DialogTitle className="text-xl">📜 Planos para Prestadores</DialogTitle>
+            <DialogDescription>Escolha o melhor plano para sua loja</DialogDescription>
           </DialogHeader>
-          <div className="space-y-3">
-            {licenses.filter(l => l.isActive).map((license) => (
-              <Card 
-                key={license.id} 
-                className={`cursor-pointer hover:border-green-500 transition-colors ${selectedLicense?.id === license.id ? 'border-2 border-green-500' : ''}`}
-                onClick={() => setSelectedLicense(license)}
-              >
-                <CardContent className="p-4">
-                  <div className="flex justify-between items-start">
-                    <div>
-                      <p className="font-bold">{license.name}</p>
-                      <p className="text-sm text-gray-500">{licenseTypeLabels[license.type]}</p>
-                    </div>
-                    <div className="text-right">
-                      <p className="font-bold text-green-600">{license.priceProvider.toLocaleString('pt-MZ')} MT</p>
-                      <p className="text-xs text-gray-500">{license.durationDays} dias</p>
-                    </div>
-                  </div>
-                </CardContent>
-              </Card>
-            ))}
-            {selectedLicense && (
-              <div className="pt-4 border-t">
-                <p className="font-medium mb-2">Método de Pagamento</p>
-                <div className="grid grid-cols-2 gap-2">
-                  {(['MPESA', 'EMOLA', 'VISA', 'MANUAL'] as PaymentMethod[]).map(method => (
-                    <Button
-                      key={method}
-                      variant={selectedPaymentMethod === method ? 'default' : 'outline'}
-                      className={selectedPaymentMethod === method ? 'bg-green-500' : ''}
-                      onClick={() => setSelectedPaymentMethod(method)}
-                    >
-                      {paymentMethodLabels[method]}
-                    </Button>
-                  ))}
-                </div>
-                <Button 
-                  className="w-full mt-4 bg-gradient-to-r from-green-500 to-emerald-600"
-                  onClick={() => {
-                    setShowLicenseModal(false)
-                    setShowPaymentModal(true)
-                  }}
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            {licenses
+              .filter(l => l.isActive && !l.isTrial && (l.targetUserType === 'PROVIDER' || l.targetUserType === 'BOTH') && ['STARTER', 'GROW', 'PRO'].includes(l.type))
+              .sort((a, b) => a.priceProvider - b.priceProvider)
+              .map((license) => (
+                <Card 
+                  key={license.id} 
+                  className={`cursor-pointer transition-all hover:shadow-lg ${selectedLicense?.id === license.id ? 'ring-2 ring-green-500 shadow-lg' : 'border'}`}
+                  onClick={() => setSelectedLicense(license)}
                 >
-                  Pagar {selectedLicense.priceProvider.toLocaleString('pt-MZ')} MT
-                </Button>
-              </div>
-            )}
+                  <CardHeader className="pb-2">
+                    <CardTitle className="text-lg text-center">{license.name}</CardTitle>
+                    <div className="text-center">
+                      <p className="text-2xl font-bold text-green-600">{license.priceProvider.toLocaleString('pt-MZ')} MT</p>
+                      <p className="text-xs text-gray-500">/mês</p>
+                    </div>
+                  </CardHeader>
+                  <CardContent className="space-y-2 text-sm">
+                    <div className="flex justify-between py-1 border-b">
+                      <span className="text-gray-500">Taxa Transação</span>
+                      <span className="font-medium">{license.transactionFeePercent || 5}%</span>
+                    </div>
+                    <div className="flex justify-between py-1 border-b">
+                      <span className="text-gray-500">Pedidos Incluídos</span>
+                      <span className="font-medium">{license.ordersIncluded || '∞'}/mês</span>
+                    </div>
+                    <div className="flex justify-between py-1 border-b">
+                      <span className="text-gray-500">Limite Produtos</span>
+                      <span className="font-medium">{license.productsLimit || '∞'}</span>
+                    </div>
+                    <div className="pt-2 space-y-1">
+                      {license.hasHighlight && (
+                        <p className="text-green-600 text-xs">✓ Destaque na plataforma</p>
+                      )}
+                      {license.hasPriority && (
+                        <p className="text-green-600 text-xs">✓ Prioridade em pedidos</p>
+                      )}
+                      {!license.hasHighlight && !license.hasPriority && (
+                        <p className="text-gray-400 text-xs">Recursos básicos</p>
+                      )}
+                    </div>
+                  </CardContent>
+                </Card>
+              ))}
           </div>
+          {selectedLicense && (
+            <div className="pt-4 border-t mt-4">
+              <p className="font-medium mb-2">Método de Pagamento</p>
+              <div className="grid grid-cols-2 gap-2">
+                {(['MPESA', 'EMOLA', 'VISA', 'MANUAL'] as PaymentMethod[]).map(method => (
+                  <Button
+                    key={method}
+                    variant={selectedPaymentMethod === method ? 'default' : 'outline'}
+                    className={selectedPaymentMethod === method ? 'bg-green-500' : ''}
+                    onClick={() => setSelectedPaymentMethod(method)}
+                  >
+                    {paymentMethodLabels[method]}
+                  </Button>
+                ))}
+              </div>
+              <Button 
+                className="w-full mt-4 bg-gradient-to-r from-green-500 to-emerald-600"
+                onClick={() => {
+                  setShowLicenseModal(false)
+                  setShowPaymentModal(true)
+                }}
+              >
+                Assinar {selectedLicense.name} - {selectedLicense.priceProvider.toLocaleString('pt-MZ')} MT
+              </Button>
+            </div>
+          )}
         </DialogContent>
       </Dialog>
 

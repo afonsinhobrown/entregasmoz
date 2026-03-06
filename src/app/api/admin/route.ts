@@ -72,6 +72,41 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ users });
     }
 
+    if (action === 'usersWithoutLicense') {
+      // Get providers and delivery persons without active license
+      const users = await db.user.findMany({
+        where: {
+          isActive: true,
+          isBlocked: false,
+          OR: [
+            { 
+              provider: {
+                OR: [
+                  { licenseExpiresAt: null },
+                  { licenseExpiresAt: { lt: new Date() } },
+                ],
+              },
+            },
+            {
+              deliveryPerson: {
+                OR: [
+                  { licenseExpiresAt: null },
+                  { licenseExpiresAt: { lt: new Date() } },
+                ],
+              },
+            },
+          ],
+        },
+        include: {
+          provider: true,
+          deliveryPerson: true,
+        },
+        orderBy: { createdAt: 'desc' },
+      });
+
+      return NextResponse.json({ users });
+    }
+
     if (action === 'settings') {
       // Get all settings
       const settings = await db.setting.findMany({
@@ -179,6 +214,87 @@ export async function POST(req: NextRequest) {
         data,
       });
       return NextResponse.json({ city });
+    }
+
+    if (action === 'createTrial') {
+      const { userId, isFree, price } = data;
+      
+      // Find TRIAL license
+      let trialLicense = await db.license.findFirst({
+        where: { type: 'TRIAL' },
+      });
+      
+      // Create TRIAL license if not exists
+      if (!trialLicense) {
+        trialLicense = await db.license.create({
+          data: {
+            name: 'Trial',
+            type: 'TRIAL',
+            priceProvider: price || 0,
+            priceDelivery: price || 0,
+            durationDays: 10,
+            isTrial: true,
+            isFree: isFree,
+            isActive: true,
+            targetUserType: 'BOTH',
+            transactionFeePercent: 5,
+          },
+        });
+      }
+      
+      // Calculate expiration date (10 days from now)
+      const expiresAt = new Date();
+      expiresAt.setDate(expiresAt.getDate() + 10);
+      
+      // Get user to determine type
+      const user = await db.user.findUnique({
+        where: { id: userId },
+        include: { provider: true, deliveryPerson: true },
+      });
+      
+      if (!user) {
+        return NextResponse.json({ error: 'Usuário não encontrado' }, { status: 404 });
+      }
+      
+      // Update user's license
+      if (user.provider) {
+        await db.provider.update({
+          where: { id: user.provider.id },
+          data: {
+            licenseId: trialLicense.id,
+            licenseExpiresAt: expiresAt,
+          },
+        });
+      } else if (user.deliveryPerson) {
+        await db.deliveryPerson.update({
+          where: { id: user.deliveryPerson.id },
+          data: {
+            licenseId: trialLicense.id,
+            licenseExpiresAt: expiresAt,
+          },
+        });
+      }
+      
+      // Create payment record if not free
+      if (!isFree && price && price > 0) {
+        await db.payment.create({
+          data: {
+            userId,
+            amount: price,
+            method: 'MANUAL',
+            status: 'COMPLETED',
+            licenseId: trialLicense.id,
+            providerId: user.provider?.id,
+            deliveryPersonId: user.deliveryPerson?.id,
+          },
+        });
+      }
+      
+      return NextResponse.json({ 
+        success: true, 
+        license: trialLicense,
+        expiresAt,
+      });
     }
 
     return NextResponse.json({ error: 'Ação não reconhecida' }, { status: 400 });
