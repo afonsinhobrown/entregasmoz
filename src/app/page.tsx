@@ -371,12 +371,39 @@ function RealMap({
 
 // Delivery Person Location Tracker
 function DeliveryPersonTracker({ user }: { user: User }) {
-  const { location } = useLocation()
+  const { location, error: locationError, loading: locationLoading } = useLocation()
   const [isAvailable, setIsAvailable] = useState(user.deliveryPerson?.isAvailable ?? false)
   const [lastUpdate, setLastUpdate] = useState<Date | null>(null)
+  const [isUpdating, setIsUpdating] = useState(false)
+  const [todayEarnings, setTodayEarnings] = useState(0)
+  const [todayDeliveries, setTodayDeliveries] = useState(0)
 
+  // Load today's stats
+  useEffect(() => {
+    const loadStats = async () => {
+      if (!user.deliveryPerson?.id) return
+      try {
+        const res = await fetch(`/api/orders?deliveryPersonId=${user.deliveryPerson.id}`)
+        const data = await res.json()
+        const today = new Date().toDateString()
+        const todayOrders = (data.orders || []).filter((o: Order) => 
+          new Date(o.createdAt).toDateString() === today && o.status === 'DELIVERED'
+        )
+        setTodayDeliveries(todayOrders.length)
+        setTodayEarnings(todayOrders.reduce((sum: number, o: Order) => sum + (o.deliveryFee * 0.8), 0))
+      } catch (error) {
+        console.error('Error loading stats:', error)
+      }
+    }
+    loadStats()
+    const interval = setInterval(loadStats, 30000)
+    return () => clearInterval(interval)
+  }, [user.deliveryPerson?.id])
+
+  // Update location when it changes
   useEffect(() => {
     if (location && user.deliveryPerson?.id) {
+      setTimeout(() => setIsUpdating(true), 0)
       fetch('/api/location', {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
@@ -387,7 +414,12 @@ function DeliveryPersonTracker({ user }: { user: User }) {
           isAvailable,
           userType: 'DELIVERY_PERSON',
         }),
-      }).then(() => setLastUpdate(new Date()))
+      }).then(() => {
+        setTimeout(() => {
+          setLastUpdate(new Date())
+          setIsUpdating(false)
+        }, 0)
+      }).catch(() => setTimeout(() => setIsUpdating(false), 0))
     }
   }, [location, user.id, user.deliveryPerson?.id, isAvailable])
 
@@ -411,53 +443,108 @@ function DeliveryPersonTracker({ user }: { user: User }) {
   }
 
   return (
-    <Card className="shadow-lg">
-      <CardHeader className="bg-gradient-to-r from-green-500 to-emerald-600 text-white py-3">
-        <CardTitle className="text-lg flex items-center gap-2">
-          🏍️ Painel do Entregador
+    <Card className="shadow-lg border-2 border-green-200">
+      <CardHeader className="bg-gradient-to-r from-green-500 to-emerald-600 text-white py-4">
+        <CardTitle className="text-xl flex items-center justify-between">
+          <span className="flex items-center gap-2">
+            🏍️ Painel do Entregador
+          </span>
+          <div className="flex items-center gap-2 text-sm">
+            {locationLoading ? (
+              <span className="animate-pulse">📍 Obtendo GPS...</span>
+            ) : locationError ? (
+              <span className="text-yellow-200">⚠️ {locationError}</span>
+            ) : location ? (
+              <span className="flex items-center gap-1">
+                <span className="w-2 h-2 bg-green-300 rounded-full animate-pulse"></span>
+                GPS Ativo
+                {isUpdating && <span className="animate-spin">⚡</span>}
+              </span>
+            ) : null}
+          </div>
         </CardTitle>
       </CardHeader>
       <CardContent className="p-4 space-y-4">
-        <div className="flex items-center justify-between">
+        {/* Status Toggle */}
+        <div className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
           <div>
-            <p className="font-medium">Status</p>
-            <p className="text-sm text-gray-500">
+            <p className="font-bold text-lg">Status</p>
+            <p className={`text-sm font-medium ${isAvailable ? 'text-green-600' : 'text-red-500'}`}>
               {isAvailable ? '🟢 Disponível para entregas' : '🔴 Indisponível'}
             </p>
           </div>
-          <Switch
-            checked={isAvailable}
-            onCheckedChange={toggleAvailability}
-          />
+          <div className="flex items-center gap-2">
+            <Switch
+              checked={isAvailable}
+              onCheckedChange={toggleAvailability}
+              className="data-[state=checked]:bg-green-500"
+            />
+          </div>
         </div>
         
+        {/* Location Info */}
         {location && (
-          <div className="text-sm text-gray-500">
-            <p>📍 Localização atual:</p>
-            <p className="font-mono text-xs">
-              {location[0].toFixed(6)}, {location[1].toFixed(6)}
+          <div className="p-3 bg-blue-50 rounded-lg">
+            <p className="text-sm font-medium text-blue-800">📍 Localização Atual</p>
+            <p className="font-mono text-xs text-blue-600">
+              Lat: {location[0].toFixed(6)}, Lng: {location[1].toFixed(6)}
             </p>
+            {lastUpdate && (
+              <p className="text-xs text-blue-500 mt-1">
+                Atualizado: {lastUpdate.toLocaleTimeString('pt-MZ')}
+              </p>
+            )}
           </div>
         )}
         
-        {lastUpdate && (
-          <p className="text-xs text-gray-400">
-            Última atualização: {lastUpdate.toLocaleTimeString('pt-MZ')}
-          </p>
-        )}
-        
-        <div className="grid grid-cols-2 gap-2">
-          <div className="p-3 bg-orange-50 rounded-lg text-center">
+        {/* Stats Grid */}
+        <div className="grid grid-cols-4 gap-2">
+          <div className="p-3 bg-orange-50 rounded-lg text-center border border-orange-200">
             <p className="text-2xl font-bold text-orange-500">
               {user.deliveryPerson?.totalDeliveries || 0}
             </p>
-            <p className="text-xs text-gray-500">Entregas</p>
+            <p className="text-xs text-gray-500">Total Entregas</p>
           </div>
-          <div className="p-3 bg-green-50 rounded-lg text-center">
+          <div className="p-3 bg-green-50 rounded-lg text-center border border-green-200">
             <p className="text-2xl font-bold text-green-500">
               ⭐ {user.deliveryPerson?.rating.toFixed(1) || '5.0'}
             </p>
             <p className="text-xs text-gray-500">Avaliação</p>
+          </div>
+          <div className="p-3 bg-blue-50 rounded-lg text-center border border-blue-200">
+            <p className="text-2xl font-bold text-blue-500">{todayDeliveries}</p>
+            <p className="text-xs text-gray-500">Hoje</p>
+          </div>
+          <div className="p-3 bg-purple-50 rounded-lg text-center border border-purple-200">
+            <p className="text-2xl font-bold text-purple-500">
+              {todayEarnings.toFixed(0)}
+            </p>
+            <p className="text-xs text-gray-500">MT Hoje</p>
+          </div>
+        </div>
+
+        {/* Quick Actions */}
+        <div className="grid grid-cols-2 gap-2">
+          <Button variant="outline" className="h-16 flex flex-col gap-1">
+            <span className="text-xl">📦</span>
+            <span className="text-xs">Pedidos Pendentes</span>
+          </Button>
+          <Button variant="outline" className="h-16 flex flex-col gap-1">
+            <span className="text-xl">📊</span>
+            <span className="text-xs">Histórico</span>
+          </Button>
+        </div>
+
+        {/* Vehicle Info */}
+        <div className="p-3 bg-gray-50 rounded-lg flex items-center gap-3">
+          <span className="text-3xl">{vehicleIcons[user.deliveryPerson?.vehicleType || 'MOTORCYCLE']}</span>
+          <div>
+            <p className="font-medium">Veículo</p>
+            <p className="text-sm text-gray-500">
+              {user.deliveryPerson?.vehicleType === 'MOTORCYCLE' ? 'Motocicleta' :
+               user.deliveryPerson?.vehicleType === 'BICYCLE' ? 'Bicicleta' :
+               user.deliveryPerson?.vehicleType === 'CAR' ? 'Carro' : 'Scooter'}
+            </p>
           </div>
         </div>
       </CardContent>
@@ -538,8 +625,8 @@ export default function Home() {
     }
     loadPublicData()
     
-    // Refresh data every 30 seconds for real-time updates
-    const interval = setInterval(loadPublicData, 30000)
+    // Refresh data every 5 seconds for near real-time updates
+    const interval = setInterval(loadPublicData, 5000)
     return () => clearInterval(interval)
   }, [])
 
@@ -931,27 +1018,52 @@ export default function Home() {
       <main className="max-w-7xl mx-auto px-4 py-4">
         {/* DELIVERY PERSON DASHBOARD */}
         {user?.userType === 'DELIVERY_PERSON' && (
-          <div className="grid md:grid-cols-3 gap-4">
-            <div className="md:col-span-2">
-              <DeliveryPersonTracker user={user} />
-            </div>
-            <div className="space-y-4">
+          <div className="space-y-4">
+            <DeliveryPersonTracker user={user} />
+            
+            {/* Mini Map showing delivery person's location */}
+            {mapLoaded && userLocation && (
               <Card className="shadow-lg">
-                <CardHeader className="py-3">
-                  <CardTitle className="text-lg">📊 Estatísticas</CardTitle>
+                <CardHeader className="py-3 bg-gradient-to-r from-blue-500 to-indigo-600 text-white">
+                  <CardTitle className="text-lg flex items-center gap-2">
+                    🗺️ Sua Localização no Mapa
+                  </CardTitle>
                 </CardHeader>
-                <CardContent className="grid grid-cols-2 gap-2">
-                  <div className="p-3 bg-orange-50 rounded-lg text-center">
-                    <p className="text-xl font-bold text-orange-500">{user.deliveryPerson?.totalDeliveries || 0}</p>
-                    <p className="text-xs text-gray-500">Entregas</p>
-                  </div>
-                  <div className="p-3 bg-green-50 rounded-lg text-center">
-                    <p className="text-xl font-bold text-green-500">⭐ {user.deliveryPerson?.rating.toFixed(1) || '5.0'}</p>
-                    <p className="text-xs text-gray-500">Avaliação</p>
+                <CardContent className="p-0">
+                  <div className="h-[300px] rounded-b-lg overflow-hidden">
+                    <MapContainer
+                      center={userLocation}
+                      zoom={15}
+                      style={{ height: '100%', width: '100%' }}
+                      scrollWheelZoom={true}
+                    >
+                      <TileLayer
+                        attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
+                        url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+                      />
+                      <Circle 
+                        center={userLocation} 
+                        radius={200}
+                        pathOptions={{ color: '#10B981', fillColor: '#10B981', fillOpacity: 0.2 }}
+                      />
+                      <Marker 
+                        position={userLocation}
+                        icon={createCustomIcon('🏍️', '#10B981')}
+                      >
+                        <Popup>
+                          <div className="text-center p-2">
+                            <p className="font-bold">📍 Você está aqui</p>
+                            <p className="text-xs text-gray-500">
+                              {userLocation[0].toFixed(4)}, {userLocation[1].toFixed(4)}
+                            </p>
+                          </div>
+                        </Popup>
+                      </Marker>
+                    </MapContainer>
                   </div>
                 </CardContent>
               </Card>
-            </div>
+            )}
           </div>
         )}
 
