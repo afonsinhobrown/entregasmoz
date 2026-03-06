@@ -999,8 +999,8 @@ export default function Home() {
               </div>
             </div>
 
-            {/* Map */}
-            {mapLoaded && userLocation && (
+            {/* Map - Only show on Delivery tab */}
+            {mainTab === 'delivery' && mapLoaded && userLocation && (
               <div className="mb-4">
                 <RealMap 
                   userLocation={userLocation}
@@ -1058,6 +1058,32 @@ export default function Home() {
             {/* Services/Products */}
             {mainTab === 'services' && (
               <>
+                {/* Available Delivery Persons (without map) */}
+                <h3 className="font-bold text-lg mb-2 flex items-center gap-2">
+                  🏍️ Entregadores Disponíveis
+                  <Badge className="bg-green-500">{deliveryPersons.filter(d => d.isAvailable).length}</Badge>
+                </h3>
+                <div className="flex gap-2 overflow-x-auto pb-2 mb-4">
+                  {deliveryPersons.filter(d => d.isAvailable).slice(0, 5).map(dp => (
+                    <Card key={dp.id} className="min-w-[140px] shrink-0 hover:shadow-md">
+                      <CardContent className="p-3 text-center">
+                        <div className="text-2xl mb-1">{vehicleIcons[dp.vehicleType]}</div>
+                        {user ? (
+                          <p className="text-sm font-medium">{dp.user?.name}</p>
+                        ) : (
+                          <p className="text-sm text-gray-400">🔒 Entregador</p>
+                        )}
+                        <p className="text-xs text-gray-500">⭐ {dp.rating.toFixed(1)}</p>
+                        {dp.currentLatitude && userLocation && (
+                          <p className="text-xs text-orange-600">
+                            📍 {calculateDistance(userLocation[0], userLocation[1], dp.currentLatitude, dp.currentLongitude!).toFixed(1)} km
+                          </p>
+                        )}
+                      </CardContent>
+                    </Card>
+                  ))}
+                </div>
+
                 {/* Providers */}
                 <h3 className="font-bold text-lg mb-2 flex items-center gap-2">
                   🏪 Fornecedores
