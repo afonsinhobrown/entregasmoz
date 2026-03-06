@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useEffect } from 'react'
+import dynamic from 'next/dynamic'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
@@ -12,6 +13,13 @@ import { Textarea } from '@/components/ui/textarea'
 import { Separator } from '@/components/ui/separator'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { HoverCard, HoverCardContent, HoverCardTrigger } from '@/components/ui/hover-card'
+import L from 'leaflet'
+
+// Dynamically import Map component (no SSR)
+const MapContainer = dynamic(() => import('react-leaflet').then(mod => mod.MapContainer), { ssr: false })
+const TileLayer = dynamic(() => import('react-leaflet').then(mod => mod.TileLayer), { ssr: false })
+const Marker = dynamic(() => import('react-leaflet').then(mod => mod.Marker), { ssr: false })
+const Popup = dynamic(() => import('react-leaflet').then(mod => mod.Popup), { ssr: false })
 
 // Types
 type UserType = 'CLIENT' | 'DELIVERY_PERSON' | 'PROVIDER'
@@ -35,6 +43,8 @@ interface Provider {
   storeDescription?: string
   category?: string
   address?: string
+  latitude?: number
+  longitude?: number
   isOpen: boolean
   products: Product[]
 }
@@ -45,7 +55,7 @@ interface Product {
   description?: string
   price: number
   providerId: string
-  provider?: { id: string; storeName: string; storeDescription?: string; category?: string; address?: string }
+  provider?: { id: string; storeName: string; storeDescription?: string; category?: string; address?: string; latitude?: number; longitude?: number }
   isAvailable: boolean
 }
 
@@ -55,6 +65,8 @@ interface DeliveryPerson {
   rating: number
   totalDeliveries: number
   isAvailable: boolean
+  currentLatitude?: number
+  currentLongitude?: number
   user?: { name: string }
 }
 
@@ -96,11 +108,168 @@ const vehicleIcons: Record<VehicleType, string> = {
   SCOOTER: '🛵',
 }
 
+// Maputo coordinates
+const MAPUTO_CENTER: [number, number] = [-25.9692, 32.5732]
+
+// Custom marker icons
+const createCustomIcon = (emoji: string, color: string = 'blue') => {
+  if (typeof window === 'undefined') return null
+  return L.divIcon({
+    html: `<div style="background: ${color}; width: 36px; height: 36px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 18px; box-shadow: 0 2px 8px rgba(0,0,0,0.3); border: 3px solid white;">${emoji}</div>`,
+    className: 'custom-marker',
+    iconSize: [36, 36],
+    iconAnchor: [18, 18],
+  })
+}
+
+// Real Map Component
+function RealMap({ providers, deliveryPersons, user, onLoginClick }: { 
+  providers: Provider[], 
+  deliveryPersons: DeliveryPerson[], 
+  user: User | null,
+  onLoginClick: () => void 
+}) {
+  const [mounted, setMounted] = useState(false)
+  const [userLocation, setUserLocation] = useState<[number, number] | null>(null)
+
+  useEffect(() => {
+    setMounted(true)
+    // Try to get user's real location
+    if (navigator.geolocation) {
+      navigator.geolocation.getCurrentPosition(
+        (pos) => {
+          setUserLocation([pos.coords.latitude, pos.coords.longitude])
+        },
+        () => {
+          // Default to Maputo if location not available
+          setUserLocation(MAPUTO_CENTER)
+        }
+      )
+    } else {
+      setUserLocation(MAPUTO_CENTER)
+    }
+  }, [])
+
+  if (!mounted || !userLocation) {
+    return (
+      <div className="h-96 bg-gray-200 flex items-center justify-center">
+        <div className="text-center">
+          <div className="animate-spin text-4xl mb-2">🗺️</div>
+          <p className="text-gray-500">Carregando mapa...</p>
+        </div>
+      </div>
+    )
+  }
+
+  return (
+    <div className="h-96 rounded-lg overflow-hidden shadow-xl border-2 border-gray-200">
+      <MapContainer
+        center={userLocation}
+        zoom={14}
+        style={{ height: '100%', width: '100%' }}
+        scrollWheelZoom={true}
+      >
+        <TileLayer
+          attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
+          url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+        />
+        
+        {/* User Location Marker */}
+        <Marker 
+          position={userLocation}
+          icon={createCustomIcon('📍', '#3B82F6')}
+        >
+          <Popup>
+            <div className="text-center">
+              <p className="font-bold">📍 Sua Localização</p>
+            </div>
+          </Popup>
+        </Marker>
+
+        {/* Provider Markers */}
+        {providers.map((provider) => {
+          const lat = provider.latitude || MAPUTO_CENTER[0] + (Math.random() - 0.5) * 0.02
+          const lng = provider.longitude || MAPUTO_CENTER[1] + (Math.random() - 0.5) * 0.02
+          const emoji = provider.category === 'Restaurante' ? '🍴' : provider.category === 'Pizzaria' ? '🍕' : '🛒'
+          const color = provider.isOpen ? '#22C55E' : '#EF4444'
+          
+          return (
+            <Marker 
+              key={provider.id}
+              position={[lat, lng]}
+              icon={createCustomIcon(emoji, color)}
+            >
+              <Popup>
+                <div className="p-1 min-w-48">
+                  <p className="font-bold text-lg">{provider.storeName}</p>
+                  <p className="text-sm text-gray-500">{provider.category}</p>
+                  <p className="text-xs mt-1">{provider.address || 'Maputo'}</p>
+                  <div className="flex items-center gap-2 mt-2">
+                    <Badge className={provider.isOpen ? 'bg-green-500' : 'bg-red-500'}>
+                      {provider.isOpen ? 'Aberto' : 'Fechado'}
+                    </Badge>
+                    <span className="text-xs">{provider.products.length} produtos</span>
+                  </div>
+                </div>
+              </Popup>
+            </Marker>
+          )
+        })}
+
+        {/* Delivery Person Markers */}
+        {deliveryPersons.map((dp) => {
+          const lat = dp.currentLatitude || MAPUTO_CENTER[0] + (Math.random() - 0.5) * 0.03
+          const lng = dp.currentLongitude || MAPUTO_CENTER[1] + (Math.random() - 0.5) * 0.03
+          
+          return (
+            <Marker 
+              key={dp.id}
+              position={[lat, lng]}
+              icon={createCustomIcon(vehicleIcons[dp.vehicleType], '#10B981')}
+            >
+              <Popup>
+                <div className="p-1 min-w-48">
+                  {user ? (
+                    <>
+                      <p className="font-bold text-lg">{dp.user?.name || 'Entregador'}</p>
+                      <div className="flex items-center gap-1 text-sm">
+                        <span>⭐ {dp.rating.toFixed(1)}</span>
+                        <span>•</span>
+                        <span>{dp.totalDeliveries} entregas</span>
+                      </div>
+                      <Badge className={dp.isAvailable ? 'bg-green-500 mt-2' : 'bg-gray-500 mt-2'}>
+                        {dp.isAvailable ? 'Disponível' : 'Ocupado'}
+                      </Badge>
+                    </>
+                  ) : (
+                    <>
+                      <p className="font-bold text-gray-400">🔒 Entregador</p>
+                      <p className="text-sm text-gray-500">Faça login para ver detalhes</p>
+                      <Button 
+                        size="sm" 
+                        className="mt-2 bg-orange-500 text-white"
+                        onClick={onLoginClick}
+                      >
+                        Entrar
+                      </Button>
+                    </>
+                  )}
+                </div>
+              </Popup>
+            </Marker>
+          )
+        })}
+      </MapContainer>
+    </div>
+  )
+}
+
 export default function Home() {
   const [user, setUser] = useState<User | null>(null)
   const [loading, setLoading] = useState(false)
   const [authTab, setAuthTab] = useState<'login' | 'register'>('login')
   const [showAuthModal, setShowAuthModal] = useState(false)
+  const [mapLoaded, setMapLoaded] = useState(false)
   
   const [registerForm, setRegisterForm] = useState({
     name: '', email: '', password: '', phone: '', userType: 'CLIENT' as UserType,
@@ -122,6 +291,21 @@ export default function Home() {
   const [mainTab, setMainTab] = useState<'services' | 'delivery'>('services')
   const [selectedDeliveryPerson, setSelectedDeliveryPerson] = useState<DeliveryPerson | null>(null)
   const [deliveryAddress, setDeliveryAddress] = useState('')
+
+  // Load Leaflet CSS
+  useEffect(() => {
+    const link = document.createElement('link')
+    link.rel = 'stylesheet'
+    link.href = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.css'
+    document.head.appendChild(link)
+    const timer = setTimeout(() => setMapLoaded(true), 100)
+    return () => {
+      clearTimeout(timer)
+      if (document.head.contains(link)) {
+        document.head.removeChild(link)
+      }
+    }
+  }, [])
 
   // Load user from localStorage
   useEffect(() => {
@@ -730,129 +914,50 @@ export default function Home() {
                 </>
               )}
 
-              {/* DELIVERY PERSONS TAB - MAP VIEW */}
+              {/* DELIVERY PERSONS TAB - REAL MAP */}
               {mainTab === 'delivery' && (
                 <>
-                  {/* Map */}
-                  <Card className="mb-6 overflow-hidden shadow-xl">
-                    <div className="h-96 bg-gradient-to-br from-green-50 via-blue-50 to-emerald-100 relative">
-                      {/* Map Background Pattern */}
-                      <div className="absolute inset-0">
-                        <svg className="w-full h-full opacity-10" viewBox="0 0 100 100">
-                          <pattern id="grid" width="10" height="10" patternUnits="userSpaceOnUse">
-                            <path d="M 10 0 L 0 0 0 10" fill="none" stroke="gray" strokeWidth="0.5"/>
-                          </pattern>
-                          <rect width="100" height="100" fill="url(#grid)" />
-                        </svg>
+                  {/* Real Map */}
+                  <div className="mb-6">
+                    <div className="flex items-center justify-between mb-3">
+                      <h2 className="text-xl font-bold flex items-center gap-2">
+                        🗺️ Mapa em Tempo Real
+                        <Badge className="bg-green-500 animate-pulse">Ao Vivo</Badge>
+                      </h2>
+                    </div>
+                    
+                    {mapLoaded && (
+                      <RealMap 
+                        providers={providers}
+                        deliveryPersons={deliveryPersons}
+                        user={user}
+                        onLoginClick={() => setShowAuthModal(true)}
+                      />
+                    )}
+                    
+                    <div className="mt-3 flex flex-wrap gap-4 justify-center text-sm bg-white p-3 rounded-lg shadow">
+                      <div className="flex items-center gap-2">
+                        <span className="w-4 h-4 bg-green-500 rounded-full"></span>
+                        <span>🍴 Restaurantes</span>
                       </div>
-                      
-                      {/* Decorative elements */}
-                      <div className="absolute inset-0">
-                        <div className="absolute top-1/4 left-1/5 w-40 h-40 bg-orange-300/30 rounded-full blur-3xl"></div>
-                        <div className="absolute bottom-1/3 right-1/4 w-32 h-32 bg-green-300/30 rounded-full blur-3xl"></div>
-                        <div className="absolute top-1/2 right-1/5 w-36 h-36 bg-blue-300/30 rounded-full blur-3xl"></div>
+                      <div className="flex items-center gap-2">
+                        <span className="w-4 h-4 bg-green-500 rounded-full"></span>
+                        <span>🍕 Pizzarias</span>
                       </div>
-
-                      {/* Map Title */}
-                      <div className="absolute top-4 left-4 bg-white/90 backdrop-blur-sm rounded-lg px-4 py-2 shadow-lg">
-                        <h3 className="font-bold text-gray-800 flex items-center gap-2">
-                          🗺️ Mapa de Maputo
-                          <Badge className="bg-green-500 text-xs">Ao Vivo</Badge>
-                        </h3>
-                        <p className="text-xs text-gray-500">Entregadores próximos a você</p>
+                      <div className="flex items-center gap-2">
+                        <span className="w-4 h-4 bg-green-500 rounded-full"></span>
+                        <span>🛒 Mercados</span>
                       </div>
-
-                      {/* Provider Markers */}
-                      {providers.slice(0, 5).map((provider, i) => {
-                        const positions = [
-                          { top: '20%', left: '15%' },
-                          { top: '35%', left: '60%' },
-                          { top: '60%', left: '25%' },
-                          { top: '75%', left: '70%' },
-                          { top: '45%', left: '45%' },
-                        ]
-                        return (
-                          <div 
-                            key={provider.id}
-                            className="absolute text-3xl cursor-pointer hover:scale-125 transition-transform animate-pulse"
-                            style={{ top: positions[i].top, left: positions[i].left }}
-                            title={provider.storeName}
-                          >
-                            <div className="bg-white rounded-full p-2 shadow-lg">
-                              {provider.category === 'Restaurante' ? '🍴' : provider.category === 'Pizzaria' ? '🍕' : '🛒'}
-                            </div>
-                          </div>
-                        )
-                      })}
-
-                      {/* Delivery Person Markers */}
-                      {deliveryPersons.slice(0, 5).map((dp, i) => {
-                        const positions = [
-                          { top: '30%', left: '40%' },
-                          { top: '55%', left: '55%' },
-                          { top: '40%', left: '20%' },
-                          { top: '70%', left: '35%' },
-                          { top: '25%', left: '75%' },
-                        ]
-                        return (
-                          <div 
-                            key={dp.id}
-                            className="absolute cursor-pointer hover:scale-125 transition-transform group"
-                            style={{ top: positions[i].top, left: positions[i].left }}
-                          >
-                            <div className="bg-gradient-to-br from-green-400 to-emerald-600 rounded-full p-2 shadow-lg animate-bounce">
-                              <span className="text-xl">{vehicleIcons[dp.vehicleType]}</span>
-                            </div>
-                            {/* Tooltip */}
-                            <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 bg-black/80 text-white text-xs rounded px-2 py-1 whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity">
-                              {user ? (
-                                <>
-                                  <p className="font-medium">{dp.user?.name || 'Entregador'}</p>
-                                  <p>⭐ {dp.rating.toFixed(1)} • {dp.totalDeliveries} entregas</p>
-                                </>
-                              ) : (
-                                <p>🔒 Faça login para ver detalhes</p>
-                              )}
-                            </div>
-                          </div>
-                        )
-                      })}
-
-                      {/* User Location */}
-                      <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2">
-                        <div className="relative">
-                          <div className="w-16 h-16 bg-blue-500/20 rounded-full animate-ping"></div>
-                          <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-6 h-6 bg-blue-500 rounded-full border-4 border-white shadow-lg flex items-center justify-center text-white text-xs">
-                            📍
-                          </div>
-                        </div>
+                      <div className="flex items-center gap-2">
+                        <span className="w-4 h-4 bg-emerald-500 rounded-full"></span>
+                        <span>🏍️ Entregadores</span>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <span className="w-4 h-4 bg-blue-500 rounded-full"></span>
+                        <span className="font-medium">📍 Você</span>
                       </div>
                     </div>
-                    <CardContent className="py-4 bg-gradient-to-r from-gray-50 to-white">
-                      <div className="flex flex-wrap gap-4 justify-center text-sm">
-                        <div className="flex items-center gap-2">
-                          <span className="text-xl">🍴</span>
-                          <span>Restaurantes</span>
-                        </div>
-                        <div className="flex items-center gap-2">
-                          <span className="text-xl">🍕</span>
-                          <span>Pizzarias</span>
-                        </div>
-                        <div className="flex items-center gap-2">
-                          <span className="text-xl">🛒</span>
-                          <span>Mercados</span>
-                        </div>
-                        <div className="flex items-center gap-2">
-                          <span className="text-xl">🏍️</span>
-                          <span>Entregadores</span>
-                        </div>
-                        <div className="flex items-center gap-2">
-                          <span className="text-xl">📍</span>
-                          <span className="text-blue-600 font-medium">Sua Localização</span>
-                        </div>
-                      </div>
-                    </CardContent>
-                  </Card>
+                  </div>
 
                   {/* Delivery Persons List */}
                   <h2 className="text-xl font-bold mb-4 flex items-center gap-2">
