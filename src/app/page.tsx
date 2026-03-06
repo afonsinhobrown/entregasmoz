@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import dynamic from 'next/dynamic'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -13,13 +13,14 @@ import { Textarea } from '@/components/ui/textarea'
 import { Separator } from '@/components/ui/separator'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { HoverCard, HoverCardContent, HoverCardTrigger } from '@/components/ui/hover-card'
-import L from 'leaflet'
+import { Switch } from '@/components/ui/switch'
 
 // Dynamically import Map component (no SSR)
 const MapContainer = dynamic(() => import('react-leaflet').then(mod => mod.MapContainer), { ssr: false })
 const TileLayer = dynamic(() => import('react-leaflet').then(mod => mod.TileLayer), { ssr: false })
 const Marker = dynamic(() => import('react-leaflet').then(mod => mod.Marker), { ssr: false })
 const Popup = dynamic(() => import('react-leaflet').then(mod => mod.Popup), { ssr: false })
+const Circle = dynamic(() => import('react-leaflet').then(mod => mod.Circle), { ssr: false })
 
 // Types
 type UserType = 'CLIENT' | 'DELIVERY_PERSON' | 'PROVIDER'
@@ -32,9 +33,9 @@ interface User {
   email: string
   phone?: string
   userType: UserType
-  client?: { id: string; address?: string }
-  deliveryPerson?: { id: string; vehicleType: VehicleType; isAvailable: boolean; rating: number; totalDeliveries: number }
-  provider?: { id: string; storeName: string; storeDescription?: string; category?: string; address?: string; isOpen: boolean }
+  client?: { id: string; address?: string; latitude?: number; longitude?: number }
+  deliveryPerson?: { id: string; vehicleType: VehicleType; isAvailable: boolean; rating: number; totalDeliveries: number; currentLatitude?: number; currentLongitude?: number }
+  provider?: { id: string; storeName: string; storeDescription?: string; category?: string; address?: string; latitude?: number; longitude?: number; isOpen: boolean }
 }
 
 interface Provider {
@@ -109,37 +110,53 @@ const vehicleIcons: Record<VehicleType, string> = {
 }
 
 // Maputo coordinates
-const MAPUTO_CENTER: [number, number] = [-25.9692, 32.5732]
+const MAPUTO_CENTER: [number, number] = [-25.9653, 32.5892]
 
 // Calculate distance between two points (Haversine formula)
 function calculateDistance(lat1: number, lon1: number, lat2: number, lon2: number): number {
-  const R = 6371 // Earth's radius in km
+  const R = 6371
   const dLat = (lat2 - lat1) * Math.PI / 180
   const dLon = (lon2 - lon1) * Math.PI / 180
-  const a = 
-    Math.sin(dLat/2) * Math.sin(dLat/2) +
+  const a = Math.sin(dLat/2) * Math.sin(dLat/2) +
     Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * 
     Math.sin(dLon/2) * Math.sin(dLon/2)
   const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a))
   return R * c
 }
 
-// Calculate estimated time (assuming 30 km/h average speed in city)
-function calculateTime(distanceKm: number, vehicleType: VehicleType): number {
+// Calculate delivery fee based on distance
+function calculateDeliveryFee(distanceKm: number): number {
+  const baseFee = 50 // MT
+  const perKmFee = 20 // MT per km
+  return Math.round(baseFee + (distanceKm * perKmFee))
+}
+
+// Calculate estimated time
+function calculateTime(distanceKm: number, vehicleType: VehicleType = 'MOTORCYCLE'): number {
   const speeds: Record<VehicleType, number> = {
-    MOTORCYCLE: 35, // km/h
+    MOTORCYCLE: 35,
     BICYCLE: 15,
     CAR: 25,
     SCOOTER: 30,
   }
   const speed = speeds[vehicleType] || 30
-  return (distanceKm / speed) * 60 // minutes
+  return (distanceKm / speed) * 60
 }
 
-// Custom marker icons
+// Leaflet reference (loaded dynamically)
+let leafletLib: typeof import('leaflet').default | null = null
+
+const getLeaflet = async () => {
+  if (!leafletLib && typeof window !== 'undefined') {
+    leafletLib = await import('leaflet').then(m => m.default)
+  }
+  return leafletLib
+}
+
+// Custom marker icon
 const createCustomIcon = (emoji: string, color: string = 'blue') => {
-  if (typeof window === 'undefined') return null
-  return L.divIcon({
+  if (typeof window === 'undefined' || !leafletLib) return null
+  return leafletLib.divIcon({
     html: `<div style="background: ${color}; width: 36px; height: 36px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 18px; box-shadow: 0 2px 8px rgba(0,0,0,0.3); border: 3px solid white;">${emoji}</div>`,
     className: 'custom-marker',
     iconSize: [36, 36],
@@ -147,53 +164,64 @@ const createCustomIcon = (emoji: string, color: string = 'blue') => {
   })
 }
 
-// Real Map Component
-function RealMap({ providers, deliveryPersons, user, onLoginClick }: { 
-  providers: Provider[], 
-  deliveryPersons: DeliveryPerson[], 
-  user: User | null,
-  onLoginClick: () => void 
-}) {
-  const [mounted, setMounted] = useState(false)
-  const [userLocation, setUserLocation] = useState<[number, number] | null>(null)
+// Location Hook
+function useLocation() {
+  const [location, setLocation] = useState<[number, number] | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  const [loading, setLoading] = useState(true)
 
   useEffect(() => {
-    // Try to get user's real location
-    if (navigator.geolocation) {
-      navigator.geolocation.getCurrentPosition(
-        (pos) => {
-          setUserLocation([pos.coords.latitude, pos.coords.longitude])
-          setMounted(true)
-        },
-        () => {
-          // Default to Maputo if location not available
-          setTimeout(() => {
-            setUserLocation(MAPUTO_CENTER)
-            setMounted(true)
-          }, 0)
-        }
-      )
-    } else {
+    // Load leaflet library
+    getLeaflet()
+    
+    if (!navigator.geolocation) {
       setTimeout(() => {
-        setUserLocation(MAPUTO_CENTER)
-        setMounted(true)
+        setError('Geolocalização não suportada')
+        setLoading(false)
       }, 0)
+      return
     }
+
+    const watchId = navigator.geolocation.watchPosition(
+      (pos) => {
+        setLocation([pos.coords.latitude, pos.coords.longitude])
+        setLoading(false)
+        setError(null)
+      },
+      () => {
+        setTimeout(() => {
+          setError('Usando localização padrão (Maputo)')
+          setLocation(MAPUTO_CENTER)
+          setLoading(false)
+        }, 0)
+      },
+      { enableHighAccuracy: true, timeout: 10000, maximumAge: 30000 }
+    )
+
+    return () => navigator.geolocation.clearWatch(watchId)
   }, [])
 
-  if (!mounted || !userLocation) {
-    return (
-      <div className="h-96 bg-gray-200 flex items-center justify-center">
-        <div className="text-center">
-          <div className="animate-spin text-4xl mb-2">🗺️</div>
-          <p className="text-gray-500">Carregando mapa...</p>
-        </div>
-      </div>
-    )
-  }
+  return { location, error, loading }
+}
 
+// Real Map Component
+function RealMap({ 
+  userLocation, 
+  providers, 
+  deliveryPersons, 
+  user, 
+  onLoginClick,
+  onProviderSelect 
+}: { 
+  userLocation: [number, number]
+  providers: Provider[]
+  deliveryPersons: DeliveryPerson[]
+  user: User | null
+  onLoginClick: () => void
+  onProviderSelect: (provider: Provider) => void
+}) {
   return (
-    <div className="h-96 rounded-lg overflow-hidden shadow-xl border-2 border-gray-200">
+    <div className="h-[500px] rounded-lg overflow-hidden shadow-xl border-2 border-gray-200">
       <MapContainer
         center={userLocation}
         zoom={14}
@@ -205,26 +233,37 @@ function RealMap({ providers, deliveryPersons, user, onLoginClick }: {
           url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
         />
         
+        {/* User Location Circle */}
+        <Circle 
+          center={userLocation} 
+          radius={500}
+          pathOptions={{ color: '#3B82F6', fillColor: '#3B82F6', fillOpacity: 0.15 }}
+        />
+        
         {/* User Location Marker */}
         <Marker 
           position={userLocation}
           icon={createCustomIcon('📍', '#3B82F6')}
         >
           <Popup>
-            <div className="text-center">
-              <p className="font-bold">📍 Sua Localização</p>
+            <div className="text-center p-2">
+              <p className="font-bold text-lg">📍 Sua Localização</p>
+              <p className="text-xs text-gray-500">
+                {userLocation[0].toFixed(4)}, {userLocation[1].toFixed(4)}
+              </p>
             </div>
           </Popup>
         </Marker>
 
         {/* Provider Markers */}
-        {providers.map((provider) => {
-          const lat = provider.latitude || MAPUTO_CENTER[0]
-          const lng = provider.longitude || MAPUTO_CENTER[1]
-          const emoji = provider.category === 'Restaurante' ? '🍴' : provider.category === 'Pizzaria' ? '🍕' : '🛒'
-          const color = provider.isOpen ? '#22C55E' : '#EF4444'
+        {providers.filter(p => p.latitude && p.longitude).map((provider) => {
+          const lat = provider.latitude!
+          const lng = provider.longitude!
           const distance = calculateDistance(userLocation[0], userLocation[1], lat, lng)
           const timeMinutes = calculateTime(distance, 'MOTORCYCLE')
+          const deliveryFee = calculateDeliveryFee(distance)
+          const emoji = provider.category === 'Restaurante' ? '🍴' : provider.category === 'Pizzaria' ? '🍕' : '🛒'
+          const color = provider.isOpen ? '#22C55E' : '#EF4444'
           
           return (
             <Marker 
@@ -233,25 +272,37 @@ function RealMap({ providers, deliveryPersons, user, onLoginClick }: {
               icon={createCustomIcon(emoji, color)}
             >
               <Popup>
-                <div className="p-2 min-w-52">
+                <div className="p-2 min-w-56">
                   <p className="font-bold text-lg">{provider.storeName}</p>
                   <p className="text-sm text-gray-500">{provider.category}</p>
-                  <p className="text-xs mt-1">{provider.address || 'Maputo'}</p>
+                  <p className="text-xs mt-1">{provider.address}</p>
                   <div className="flex items-center gap-2 mt-2">
                     <Badge className={provider.isOpen ? 'bg-green-500' : 'bg-red-500'}>
                       {provider.isOpen ? 'Aberto' : 'Fechado'}
                     </Badge>
-                    <span className="text-xs">{provider.products.length} produtos</span>
                   </div>
                   <Separator className="my-2" />
-                  <div className="flex justify-between text-sm">
-                    <span className="text-gray-500">📍 Distância:</span>
-                    <span className="font-bold text-orange-600">{distance.toFixed(1)} km</span>
+                  <div className="space-y-1 text-sm">
+                    <div className="flex justify-between">
+                      <span className="text-gray-500">📍 Distância:</span>
+                      <span className="font-bold text-orange-600">{distance.toFixed(1)} km</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-gray-500">⏱️ Tempo estimado:</span>
+                      <span className="font-bold text-green-600">{Math.round(timeMinutes)} min</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-gray-500">🚚 Taxa de entrega:</span>
+                      <span className="font-bold text-purple-600">{deliveryFee} MT</span>
+                    </div>
                   </div>
-                  <div className="flex justify-between text-sm">
-                    <span className="text-gray-500">⏱️ Tempo estimado:</span>
-                    <span className="font-bold text-green-600">{Math.round(timeMinutes)} min</span>
-                  </div>
+                  <Button 
+                    size="sm" 
+                    className="w-full mt-2 bg-gradient-to-r from-orange-500 to-red-500"
+                    onClick={() => onProviderSelect(provider)}
+                  >
+                    Ver Produtos
+                  </Button>
                 </div>
               </Popup>
             </Marker>
@@ -259,9 +310,9 @@ function RealMap({ providers, deliveryPersons, user, onLoginClick }: {
         })}
 
         {/* Delivery Person Markers */}
-        {deliveryPersons.map((dp) => {
-          const lat = dp.currentLatitude || MAPUTO_CENTER[0]
-          const lng = dp.currentLongitude || MAPUTO_CENTER[1]
+        {deliveryPersons.filter(dp => dp.currentLatitude && dp.currentLongitude).map((dp) => {
+          const lat = dp.currentLatitude!
+          const lng = dp.currentLongitude!
           const distance = calculateDistance(userLocation[0], userLocation[1], lat, lng)
           const timeMinutes = calculateTime(distance, dp.vehicleType)
           
@@ -284,41 +335,29 @@ function RealMap({ providers, deliveryPersons, user, onLoginClick }: {
                       <Badge className={dp.isAvailable ? 'bg-green-500 mt-2' : 'bg-gray-500 mt-2'}>
                         {dp.isAvailable ? 'Disponível' : 'Ocupado'}
                       </Badge>
-                      <Separator className="my-2" />
-                      <div className="flex justify-between text-sm">
-                        <span className="text-gray-500">📍 Distância:</span>
-                        <span className="font-bold text-orange-600">{distance.toFixed(1)} km</span>
-                      </div>
-                      <div className="flex justify-between text-sm">
-                        <span className="text-gray-500">⏱️ Chega em:</span>
-                        <span className="font-bold text-green-600">{Math.round(timeMinutes)} min</span>
-                      </div>
-                      <div className="flex justify-between text-sm">
-                        <span className="text-gray-500">🏍️ Veículo:</span>
-                        <span className="font-medium">{vehicleIcons[dp.vehicleType]} {dp.vehicleType.toLowerCase()}</span>
-                      </div>
                     </>
                   ) : (
-                    <>
-                      <p className="font-bold text-gray-400">🔒 Entregador</p>
-                      <p className="text-sm text-gray-500">Faça login para ver detalhes</p>
-                      <Separator className="my-2" />
-                      <div className="flex justify-between text-sm">
-                        <span className="text-gray-500">📍 Distância:</span>
-                        <span className="font-bold text-orange-600">{distance.toFixed(1)} km</span>
-                      </div>
-                      <div className="flex justify-between text-sm">
-                        <span className="text-gray-500">⏱️ Chega em:</span>
-                        <span className="font-bold text-green-600">~{Math.round(timeMinutes)} min</span>
-                      </div>
-                      <Button 
-                        size="sm" 
-                        className="mt-2 w-full bg-orange-500 text-white"
-                        onClick={onLoginClick}
-                      >
-                        🔐 Entrar para Ver Detalhes
-                      </Button>
-                    </>
+                    <p className="font-bold text-gray-400">🔒 Entregador</p>
+                  )}
+                  <Separator className="my-2" />
+                  <div className="space-y-1 text-sm">
+                    <div className="flex justify-between">
+                      <span className="text-gray-500">📍 Distância:</span>
+                      <span className="font-bold text-orange-600">{distance.toFixed(1)} km</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-gray-500">⏱️ Chega em:</span>
+                      <span className="font-bold text-green-600">{Math.round(timeMinutes)} min</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-gray-500">🏍️ Veículo:</span>
+                      <span>{vehicleIcons[dp.vehicleType]}</span>
+                    </div>
+                  </div>
+                  {!user && (
+                    <Button size="sm" className="w-full mt-2 bg-orange-500" onClick={onLoginClick}>
+                      🔐 Ver Detalhes
+                    </Button>
                   )}
                 </div>
               </Popup>
@@ -327,6 +366,102 @@ function RealMap({ providers, deliveryPersons, user, onLoginClick }: {
         })}
       </MapContainer>
     </div>
+  )
+}
+
+// Delivery Person Location Tracker
+function DeliveryPersonTracker({ user }: { user: User }) {
+  const { location } = useLocation()
+  const [isAvailable, setIsAvailable] = useState(user.deliveryPerson?.isAvailable ?? false)
+  const [lastUpdate, setLastUpdate] = useState<Date | null>(null)
+
+  useEffect(() => {
+    if (location && user.deliveryPerson?.id) {
+      fetch('/api/location', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          userId: user.id,
+          latitude: location[0],
+          longitude: location[1],
+          isAvailable,
+          userType: 'DELIVERY_PERSON',
+        }),
+      }).then(() => setLastUpdate(new Date()))
+    }
+  }, [location, user.id, user.deliveryPerson?.id, isAvailable])
+
+  const toggleAvailability = async () => {
+    const newAvailable = !isAvailable
+    setIsAvailable(newAvailable)
+    
+    if (location) {
+      await fetch('/api/location', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          userId: user.id,
+          latitude: location[0],
+          longitude: location[1],
+          isAvailable: newAvailable,
+          userType: 'DELIVERY_PERSON',
+        }),
+      })
+    }
+  }
+
+  return (
+    <Card className="shadow-lg">
+      <CardHeader className="bg-gradient-to-r from-green-500 to-emerald-600 text-white py-3">
+        <CardTitle className="text-lg flex items-center gap-2">
+          🏍️ Painel do Entregador
+        </CardTitle>
+      </CardHeader>
+      <CardContent className="p-4 space-y-4">
+        <div className="flex items-center justify-between">
+          <div>
+            <p className="font-medium">Status</p>
+            <p className="text-sm text-gray-500">
+              {isAvailable ? '🟢 Disponível para entregas' : '🔴 Indisponível'}
+            </p>
+          </div>
+          <Switch
+            checked={isAvailable}
+            onCheckedChange={toggleAvailability}
+          />
+        </div>
+        
+        {location && (
+          <div className="text-sm text-gray-500">
+            <p>📍 Localização atual:</p>
+            <p className="font-mono text-xs">
+              {location[0].toFixed(6)}, {location[1].toFixed(6)}
+            </p>
+          </div>
+        )}
+        
+        {lastUpdate && (
+          <p className="text-xs text-gray-400">
+            Última atualização: {lastUpdate.toLocaleTimeString('pt-MZ')}
+          </p>
+        )}
+        
+        <div className="grid grid-cols-2 gap-2">
+          <div className="p-3 bg-orange-50 rounded-lg text-center">
+            <p className="text-2xl font-bold text-orange-500">
+              {user.deliveryPerson?.totalDeliveries || 0}
+            </p>
+            <p className="text-xs text-gray-500">Entregas</p>
+          </div>
+          <div className="p-3 bg-green-50 rounded-lg text-center">
+            <p className="text-2xl font-bold text-green-500">
+              ⭐ {user.deliveryPerson?.rating.toFixed(1) || '5.0'}
+            </p>
+            <p className="text-xs text-gray-500">Avaliação</p>
+          </div>
+        </div>
+      </CardContent>
+    </Card>
   )
 }
 
@@ -357,6 +492,9 @@ export default function Home() {
   const [mainTab, setMainTab] = useState<'services' | 'delivery'>('services')
   const [selectedDeliveryPerson, setSelectedDeliveryPerson] = useState<DeliveryPerson | null>(null)
   const [deliveryAddress, setDeliveryAddress] = useState('')
+  const [selectedProvider, setSelectedProvider] = useState<Provider | null>(null)
+
+  const { location: userLocation, loading: locationLoading } = useLocation()
 
   // Load Leaflet CSS
   useEffect(() => {
@@ -367,9 +505,7 @@ export default function Home() {
     const timer = setTimeout(() => setMapLoaded(true), 100)
     return () => {
       clearTimeout(timer)
-      if (document.head.contains(link)) {
-        document.head.removeChild(link)
-      }
+      if (document.head.contains(link)) document.head.removeChild(link)
     }
   }, [])
 
@@ -401,13 +537,16 @@ export default function Home() {
       }
     }
     loadPublicData()
+    
+    // Refresh data every 30 seconds for real-time updates
+    const interval = setInterval(loadPublicData, 30000)
+    return () => clearInterval(interval)
   }, [])
 
   // Load user data when user changes
   useEffect(() => {
     const loadUserData = async () => {
       if (!user) return
-      
       if (user.userType === 'CLIENT' && user.client?.id) {
         try {
           const res = await fetch(`/api/orders?clientId=${user.client.id}`)
@@ -516,6 +655,14 @@ export default function Home() {
 
   const getCartTotal = () => cart.reduce((total, item) => total + item.product.price * item.quantity, 0)
   const getCartItemCount = () => cart.reduce((count, item) => count + item.quantity, 0)
+  
+  const getDeliveryFee = useCallback(() => {
+    if (!userLocation || cart.length === 0) return 100
+    const firstProduct = cart[0].product
+    const provider = providers.find(p => p.id === firstProduct.providerId)
+    if (!provider?.latitude || !provider?.longitude) return 100
+    return calculateDeliveryFee(calculateDistance(userLocation[0], userLocation[1], provider.latitude, provider.longitude))
+  }, [userLocation, cart, providers])
 
   // Order functions
   const proceedToCheckout = async () => {
@@ -546,7 +693,7 @@ export default function Home() {
           providerId,
           items: cart.map(item => ({ productId: item.product.id, quantity: item.quantity })),
           deliveryAddress,
-          deliveryFee: 100,
+          deliveryFee: getDeliveryFee(),
         }),
       })
       const data = await res.json()
@@ -579,6 +726,9 @@ export default function Home() {
   // Filter functions
   const getFilteredProducts = () => {
     let filtered = allProducts
+    if (selectedProvider) {
+      filtered = filtered.filter(p => p.providerId === selectedProvider.id)
+    }
     if (selectedCategory !== 'all') {
       filtered = filtered.filter(p => {
         const provider = providers.find(prov => prov.id === p.providerId)
@@ -608,49 +758,53 @@ export default function Home() {
     return filtered
   }
 
-  // ===== RENDER =====
+  // Sort delivery persons by distance
+  const getSortedDeliveryPersons = () => {
+    if (!userLocation) return deliveryPersons
+    return [...deliveryPersons]
+      .filter(dp => dp.currentLatitude && dp.currentLongitude)
+      .map(dp => ({
+        ...dp,
+        distance: calculateDistance(userLocation[0], userLocation[1], dp.currentLatitude!, dp.currentLongitude!)
+      }))
+      .sort((a, b) => a.distance - b.distance)
+  }
+
   return (
     <div className="min-h-screen bg-gray-50">
       {/* Header */}
       <header className="bg-gradient-to-r from-orange-500 via-red-500 to-pink-500 text-white sticky top-0 z-50 shadow-xl">
-        <div className="max-w-7xl mx-auto px-4 py-4 flex items-center justify-between">
+        <div className="max-w-7xl mx-auto px-4 py-3 flex items-center justify-between">
           <div className="flex items-center gap-3">
-            <div className="w-12 h-12 bg-white rounded-full flex items-center justify-center shadow-lg">
-              <span className="text-2xl">🛵</span>
+            <div className="w-10 h-10 bg-white rounded-full flex items-center justify-center shadow-lg">
+              <span className="text-xl">🛵</span>
             </div>
             <div>
-              <h1 className="font-bold text-2xl">EntregasMoz</h1>
-              <p className="text-xs text-white/80">Entregas rápidas em Moçambique</p>
+              <h1 className="font-bold text-xl">EntregasMoz</h1>
+              <p className="text-xs text-white/80">Entregas em Moçambique</p>
             </div>
           </div>
           
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-2">
             {user ? (
               <>
-                <Button variant="ghost" className="text-white relative hover:bg-white/20" onClick={() => setView('cart')}>
-                  🛒 Carrinho
-                  {getCartItemCount() > 0 && (
-                    <Badge className="absolute -top-1 -right-1 bg-yellow-400 text-black text-xs px-1.5">
-                      {getCartItemCount()}
-                    </Badge>
-                  )}
-                </Button>
-                <Button variant="ghost" className="text-white hover:bg-white/20" onClick={() => setView('orders')}>
-                  📦 Pedidos
-                </Button>
-                <Separator orientation="vertical" className="h-8 bg-white/30" />
-                <div className="flex items-center gap-2">
-                  <div className="w-8 h-8 bg-white/20 rounded-full flex items-center justify-center">
-                    👤
-                  </div>
-                  <span className="hidden md:block text-sm font-medium">{user.name}</span>
-                </div>
-                <Button variant="ghost" className="text-white hover:bg-white/20" onClick={logout}>
-                  Sair 👋
-                </Button>
+                {user.userType === 'CLIENT' && (
+                  <>
+                    <Button variant="ghost" className="text-white relative hover:bg-white/20" onClick={() => setView('cart')}>
+                      🛒
+                      {getCartItemCount() > 0 && (
+                        <Badge className="absolute -top-1 -right-1 bg-yellow-400 text-black text-xs">{getCartItemCount()}</Badge>
+                      )}
+                    </Button>
+                    <Button variant="ghost" className="text-white hover:bg-white/20" onClick={() => setView('orders')}>📦</Button>
+                  </>
+                )}
+                <Separator orientation="vertical" className="h-6 bg-white/30" />
+                <span className="text-sm hidden md:block">{user.name}</span>
+                <Button variant="ghost" className="text-white hover:bg-white/20" onClick={logout}>👋</Button>
               </>
             ) : (
-              <Button className="bg-white text-orange-600 hover:bg-orange-100 font-bold px-6 shadow-lg" onClick={() => setShowAuthModal(true)}>
+              <Button className="bg-white text-orange-600 hover:bg-orange-100 font-bold px-4" onClick={() => setShowAuthModal(true)}>
                 🔐 Entrar
               </Button>
             )}
@@ -662,8 +816,8 @@ export default function Home() {
       <Dialog open={showAuthModal} onOpenChange={setShowAuthModal}>
         <DialogContent className="max-w-md max-h-[90vh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle className="text-center text-2xl bg-gradient-to-r from-orange-500 to-red-500 bg-clip-text text-transparent">
-              {authTab === 'login' ? '🔐 Entrar na Conta' : '✨ Criar Nova Conta'}
+            <DialogTitle className="text-center text-xl bg-gradient-to-r from-orange-500 to-red-500 bg-clip-text text-transparent">
+              {authTab === 'login' ? '🔐 Entrar' : '✨ Criar Conta'}
             </DialogTitle>
           </DialogHeader>
           <Tabs value={authTab} onValueChange={(v) => setAuthTab(v as 'login' | 'register')}>
@@ -672,12 +826,12 @@ export default function Home() {
               <TabsTrigger value="register">Registrar</TabsTrigger>
             </TabsList>
 
-            <TabsContent value="login" className="space-y-4 mt-4">
-              <div className="space-y-2">
+            <TabsContent value="login" className="space-y-3 mt-3">
+              <div className="space-y-1">
                 <Label>Email</Label>
                 <Input type="email" placeholder="seu@email.com" value={loginForm.email} onChange={e => setLoginForm({ ...loginForm, email: e.target.value })} />
               </div>
-              <div className="space-y-2">
+              <div className="space-y-1">
                 <Label>Senha</Label>
                 <Input type="password" placeholder="••••••" value={loginForm.password} onChange={e => setLoginForm({ ...loginForm, password: e.target.value })} />
               </div>
@@ -686,8 +840,8 @@ export default function Home() {
               </Button>
             </TabsContent>
 
-            <TabsContent value="register" className="space-y-4 mt-4">
-              <div className="space-y-2">
+            <TabsContent value="register" className="space-y-3 mt-3">
+              <div className="space-y-1">
                 <Label>Tipo de Conta</Label>
                 <Select value={registerForm.userType} onValueChange={(v) => setRegisterForm({ ...registerForm, userType: v as UserType })}>
                   <SelectTrigger><SelectValue /></SelectTrigger>
@@ -698,25 +852,25 @@ export default function Home() {
                   </SelectContent>
                 </Select>
               </div>
-              <div className="space-y-2">
-                <Label>Nome Completo</Label>
+              <div className="space-y-1">
+                <Label>Nome</Label>
                 <Input value={registerForm.name} onChange={e => setRegisterForm({ ...registerForm, name: e.target.value })} />
               </div>
-              <div className="space-y-2">
+              <div className="space-y-1">
                 <Label>Email</Label>
                 <Input type="email" value={registerForm.email} onChange={e => setRegisterForm({ ...registerForm, email: e.target.value })} />
               </div>
-              <div className="space-y-2">
+              <div className="space-y-1">
                 <Label>Senha</Label>
                 <Input type="password" value={registerForm.password} onChange={e => setRegisterForm({ ...registerForm, password: e.target.value })} />
               </div>
-              <div className="space-y-2">
+              <div className="space-y-1">
                 <Label>Telefone</Label>
                 <Input value={registerForm.phone} onChange={e => setRegisterForm({ ...registerForm, phone: e.target.value })} />
               </div>
 
               {registerForm.userType === 'CLIENT' && (
-                <div className="space-y-2">
+                <div className="space-y-1">
                   <Label>Endereço</Label>
                   <Input value={registerForm.address} onChange={e => setRegisterForm({ ...registerForm, address: e.target.value })} />
                 </div>
@@ -724,8 +878,8 @@ export default function Home() {
 
               {registerForm.userType === 'DELIVERY_PERSON' && (
                 <>
-                  <div className="space-y-2">
-                    <Label>Tipo de Veículo</Label>
+                  <div className="space-y-1">
+                    <Label>Veículo</Label>
                     <Select value={registerForm.vehicleType} onValueChange={(v) => setRegisterForm({ ...registerForm, vehicleType: v as VehicleType })}>
                       <SelectTrigger><SelectValue /></SelectTrigger>
                       <SelectContent>
@@ -735,7 +889,7 @@ export default function Home() {
                       </SelectContent>
                     </Select>
                   </div>
-                  <div className="space-y-2">
+                  <div className="space-y-1">
                     <Label>Matrícula</Label>
                     <Input value={registerForm.plateNumber} onChange={e => setRegisterForm({ ...registerForm, plateNumber: e.target.value })} />
                   </div>
@@ -744,11 +898,11 @@ export default function Home() {
 
               {registerForm.userType === 'PROVIDER' && (
                 <>
-                  <div className="space-y-2">
+                  <div className="space-y-1">
                     <Label>Nome da Loja</Label>
                     <Input value={registerForm.storeName} onChange={e => setRegisterForm({ ...registerForm, storeName: e.target.value })} />
                   </div>
-                  <div className="space-y-2">
+                  <div className="space-y-1">
                     <Label>Categoria</Label>
                     <Select value={registerForm.category} onValueChange={(v) => setRegisterForm({ ...registerForm, category: v })}>
                       <SelectTrigger><SelectValue placeholder="Selecione" /></SelectTrigger>
@@ -759,11 +913,7 @@ export default function Home() {
                       </SelectContent>
                     </Select>
                   </div>
-                  <div className="space-y-2">
-                    <Label>Descrição</Label>
-                    <Textarea value={registerForm.storeDescription} onChange={e => setRegisterForm({ ...registerForm, storeDescription: e.target.value })} />
-                  </div>
-                  <div className="space-y-2">
+                  <div className="space-y-1">
                     <Label>Endereço</Label>
                     <Input value={registerForm.storeAddress} onChange={e => setRegisterForm({ ...registerForm, storeAddress: e.target.value })} />
                   </div>
@@ -775,474 +925,270 @@ export default function Home() {
               </Button>
             </TabsContent>
           </Tabs>
-          <p className="text-xs text-center text-gray-500 border-t pt-3">
-            Teste: ana@email.com, joao@email.com, sabor@email.com (senha: 123456)
-          </p>
         </DialogContent>
       </Dialog>
 
-      <main className="max-w-7xl mx-auto px-4 py-6">
-        {/* LANDING VIEW */}
-        {(view === 'landing' || !user) && (
-          <div className="flex gap-6">
-            {/* Main Content */}
-            <div className="flex-1">
-              {/* Main Tabs */}
-              <div className="flex gap-2 mb-4">
-                <Button 
-                  className={`flex-1 py-3 text-lg font-medium ${mainTab === 'services' ? 'bg-gradient-to-r from-orange-500 to-red-500 text-white shadow-lg' : 'bg-white text-gray-700 hover:bg-gray-100'}`}
-                  onClick={() => setMainTab('services')}
-                >
-                  🏪 Serviços
-                </Button>
-                <Button 
-                  className={`flex-1 py-3 text-lg font-medium ${mainTab === 'delivery' ? 'bg-gradient-to-r from-green-500 to-emerald-600 text-white shadow-lg' : 'bg-white text-gray-700 hover:bg-gray-100'}`}
-                  onClick={() => setMainTab('delivery')}
-                >
-                  🏍️ Entregadores Perto de Mim
-                </Button>
-              </div>
+      <main className="max-w-7xl mx-auto px-4 py-4">
+        {/* DELIVERY PERSON DASHBOARD */}
+        {user?.userType === 'DELIVERY_PERSON' && (
+          <div className="grid md:grid-cols-3 gap-4">
+            <div className="md:col-span-2">
+              <DeliveryPersonTracker user={user} />
+            </div>
+            <div className="space-y-4">
+              <Card className="shadow-lg">
+                <CardHeader className="py-3">
+                  <CardTitle className="text-lg">📊 Estatísticas</CardTitle>
+                </CardHeader>
+                <CardContent className="grid grid-cols-2 gap-2">
+                  <div className="p-3 bg-orange-50 rounded-lg text-center">
+                    <p className="text-xl font-bold text-orange-500">{user.deliveryPerson?.totalDeliveries || 0}</p>
+                    <p className="text-xs text-gray-500">Entregas</p>
+                  </div>
+                  <div className="p-3 bg-green-50 rounded-lg text-center">
+                    <p className="text-xl font-bold text-green-500">⭐ {user.deliveryPerson?.rating.toFixed(1) || '5.0'}</p>
+                    <p className="text-xs text-gray-500">Avaliação</p>
+                  </div>
+                </CardContent>
+              </Card>
+            </div>
+          </div>
+        )}
 
-              {/* Search */}
-              <div className="relative mb-4">
-                <Input 
-                  className="bg-white shadow-md pl-12 py-3 text-lg border-0"
-                  placeholder="🔍 Buscar serviços, restaurantes, produtos..."
-                  value={searchQuery}
-                  onChange={e => setSearchQuery(e.target.value)}
+        {/* CLIENT / LANDING VIEW */}
+        {user?.userType !== 'DELIVERY_PERSON' && (
+          <>
+            {/* Main Tabs */}
+            <div className="flex gap-2 mb-4">
+              <Button 
+                className={`flex-1 py-2 text-base font-medium ${mainTab === 'services' ? 'bg-gradient-to-r from-orange-500 to-red-500 text-white shadow-lg' : 'bg-white text-gray-700 hover:bg-gray-100'}`}
+                onClick={() => setMainTab('services')}
+              >
+                🏪 Serviços
+              </Button>
+              <Button 
+                className={`flex-1 py-2 text-base font-medium ${mainTab === 'delivery' ? 'bg-gradient-to-r from-green-500 to-emerald-600 text-white shadow-lg' : 'bg-white text-gray-700 hover:bg-gray-100'}`}
+                onClick={() => setMainTab('delivery')}
+              >
+                🏍️ Entregadores Perto
+              </Button>
+            </div>
+
+            {/* Search */}
+            <Input 
+              className="bg-white shadow-md mb-4"
+              placeholder="🔍 Buscar..."
+              value={searchQuery}
+              onChange={e => setSearchQuery(e.target.value)}
+            />
+
+            {/* Categories */}
+            <div className="bg-white rounded-lg shadow p-2 mb-4 overflow-x-auto">
+              <div className="flex gap-1">
+                {categories.map(cat => (
+                  <Button 
+                    key={cat.id}
+                    size="sm"
+                    variant={selectedCategory === cat.id ? 'default' : 'ghost'}
+                    className={`rounded-full ${selectedCategory === cat.id ? 'bg-orange-500 text-white' : ''}`}
+                    onClick={() => setSelectedCategory(cat.id)}
+                  >
+                    {cat.icon} {cat.name}
+                  </Button>
+                ))}
+              </div>
+            </div>
+
+            {/* Map */}
+            {mapLoaded && userLocation && (
+              <div className="mb-4">
+                <RealMap 
+                  userLocation={userLocation}
+                  providers={getFilteredProviders()}
+                  deliveryPersons={deliveryPersons}
+                  user={user}
+                  onLoginClick={() => setShowAuthModal(true)}
+                  onProviderSelect={(p) => {
+                    setSelectedProvider(p)
+                    setSearchQuery(p.storeName)
+                  }}
                 />
               </div>
+            )}
 
-              {/* Categories */}
-              <div className="bg-white rounded-xl shadow-md p-3 mb-6 overflow-x-auto">
-                <div className="flex gap-2">
-                  {categories.map(cat => (
-                    <Button 
-                      key={cat.id}
-                      variant={selectedCategory === cat.id ? 'default' : 'ghost'}
-                      className={`rounded-full whitespace-nowrap px-4 py-2 ${selectedCategory === cat.id ? 'bg-gradient-to-r from-orange-500 to-red-500 text-white shadow-md' : 'hover:bg-gray-100'}`}
-                      onClick={() => setSelectedCategory(cat.id)}
-                    >
-                      {cat.icon} {cat.name}
-                    </Button>
-                  ))}
+            {/* Nearby Delivery Persons List */}
+            {mainTab === 'delivery' && (
+              <div className="mb-4">
+                <h3 className="font-bold text-lg mb-2 flex items-center gap-2">
+                  🏍️ Entregadores Próximos
+                  <Badge className="bg-green-500">{getSortedDeliveryPersons().length}</Badge>
+                </h3>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                  {getSortedDeliveryPersons().slice(0, 6).map((dp) => {
+                    const timeMinutes = calculateTime(dp.distance, dp.vehicleType)
+                    return (
+                      <Card key={dp.id} className="hover:shadow-md transition-shadow">
+                        <CardContent className="p-3 flex items-center gap-3">
+                          <div className="w-12 h-12 bg-gradient-to-br from-green-400 to-emerald-600 rounded-full flex items-center justify-center text-2xl">
+                            {vehicleIcons[dp.vehicleType]}
+                          </div>
+                          <div className="flex-1">
+                            {user ? (
+                              <p className="font-medium">{dp.user?.name || 'Entregador'}</p>
+                            ) : (
+                              <p className="font-medium text-gray-400">🔒 Entregador</p>
+                            )}
+                            <div className="flex items-center gap-2 text-xs text-gray-500">
+                              <span>📍 {dp.distance.toFixed(1)} km</span>
+                              <span>⏱️ {Math.round(timeMinutes)} min</span>
+                              <span>⭐ {dp.rating.toFixed(1)}</span>
+                            </div>
+                          </div>
+                          <Badge className={dp.isAvailable ? 'bg-green-500' : 'bg-gray-400'}>
+                            {dp.isAvailable ? 'Disponível' : 'Ocupado'}
+                          </Badge>
+                        </CardContent>
+                      </Card>
+                    )
+                  })}
                 </div>
               </div>
+            )}
 
-              {/* SERVICES TAB */}
-              {mainTab === 'services' && (
-                <>
-                  {/* Services Feed */}
-                  <h2 className="text-xl font-bold mb-4 flex items-center gap-2">
-                    🏪 Serviços Disponíveis
-                    <Badge variant="secondary" className="text-sm">{getFilteredProviders().length}</Badge>
-                  </h2>
-                  
-                  <div className="space-y-4 mb-8">
-                    {getFilteredProviders().map(provider => (
-                      <HoverCard key={provider.id} openDelay={200} closeDelay={100}>
-                        <HoverCardTrigger asChild>
-                          <Card className="cursor-pointer transition-all duration-300 hover:shadow-xl hover:-translate-y-1 overflow-hidden">
-                            <div className="flex">
-                              <div className="w-32 h-32 bg-gradient-to-br from-orange-200 via-red-200 to-pink-200 flex items-center justify-center text-5xl shrink-0">
-                                {provider.category === 'Restaurante' ? '🍴' : provider.category === 'Pizzaria' ? '🍕' : '🛒'}
-                              </div>
-                              <div className="flex-1 p-4">
-                                <div className="flex items-start justify-between">
-                                  <div>
-                                    <h3 className="font-bold text-lg">{provider.storeName}</h3>
-                                    <p className="text-gray-500 text-sm">{provider.category}</p>
-                                  </div>
-                                  <Badge variant={provider.isOpen ? 'default' : 'secondary'} className={`${provider.isOpen ? 'bg-green-500 hover:bg-green-600' : ''}`}>
-                                    {provider.isOpen ? '🟢 Aberto' : '🔴 Fechado'}
-                                  </Badge>
-                                </div>
-                                <p className="text-gray-600 text-sm mt-2 line-clamp-2">{provider.storeDescription}</p>
-                                <div className="flex items-center gap-4 mt-3 text-sm text-gray-500">
-                                  <span>📍 {provider.address || 'Maputo'}</span>
-                                  <span>📦 {provider.products.length} produtos</span>
-                                </div>
-                              </div>
-                            </div>
-                          </Card>
-                        </HoverCardTrigger>
-                        <HoverCardContent className="w-80 p-4 shadow-xl border-0" side="right">
-                          <div className="space-y-3">
-                            <div className="flex items-center gap-3">
-                              <div className="w-12 h-12 bg-gradient-to-br from-orange-400 to-red-500 rounded-lg flex items-center justify-center text-2xl text-white">
-                                {provider.category === 'Restaurante' ? '🍴' : provider.category === 'Pizzaria' ? '🍕' : '🛒'}
-                              </div>
-                              <div>
-                                <h3 className="font-bold text-lg">{provider.storeName}</h3>
-                                <p className="text-sm text-gray-500">{provider.category}</p>
-                              </div>
-                            </div>
-                            <Separator />
-                            <div className="space-y-2">
-                              <p className="text-sm text-gray-700">{provider.storeDescription}</p>
-                              <div className="flex items-center gap-2 text-sm text-gray-500">
-                                <span>📍</span>
-                                <span>{provider.address || 'Maputo, Moçambique'}</span>
-                              </div>
-                              <div className="flex items-center gap-2 text-sm">
-                                <span>📦</span>
-                                <span className="font-medium">{provider.products.length} produtos disponíveis</span>
-                              </div>
-                              <div className="flex items-center gap-2 text-sm">
-                                <span>🕐</span>
-                                <span className={provider.isOpen ? 'text-green-600 font-medium' : 'text-red-500'}>
-                                  {provider.isOpen ? 'Aberto agora' : 'Fechado'}
-                                </span>
-                              </div>
-                            </div>
-                            <Button 
-                              size="sm" 
-                              className="w-full bg-gradient-to-r from-orange-500 to-red-500 shadow-md" 
-                              onClick={() => setSearchQuery(provider.storeName)}
-                            >
-                              Ver Produtos →
-                            </Button>
-                          </div>
-                        </HoverCardContent>
-                      </HoverCard>
-                    ))}
-                  </div>
-
-                  {/* Products Feed */}
-                  <h2 className="text-xl font-bold mb-4 flex items-center gap-2">
-                    🍽️ Produtos em Destaque
-                    <Badge variant="secondary" className="text-sm">{getFilteredProducts().length}</Badge>
-                  </h2>
-                  
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    {getFilteredProducts().map(product => (
-                      <HoverCard key={product.id} openDelay={200} closeDelay={100}>
-                        <HoverCardTrigger asChild>
-                          <Card className="overflow-hidden hover:shadow-lg cursor-pointer transition-all duration-300 hover:-translate-y-1">
-                            <CardContent className="p-4">
-                              <div className="flex gap-4">
-                                <div className="w-20 h-20 bg-gradient-to-br from-gray-100 to-gray-200 rounded-xl flex items-center justify-center text-3xl shrink-0">
-                                  {product.name.toLowerCase().includes('pizza') ? '🍕' : 
-                                   product.name.toLowerCase().includes('coca') || product.name.toLowerCase().includes('bebida') ? '🥤' : 
-                                   product.name.toLowerCase().includes('hamb') ? '🍔' : '🍽️'}
-                                </div>
-                                <div className="flex-1 min-w-0">
-                                  <h3 className="font-semibold text-base truncate">{product.name}</h3>
-                                  <p className="text-sm text-gray-500 line-clamp-2">{product.description}</p>
-                                  <div className="flex items-center justify-between mt-2">
-                                    <Badge className="bg-green-500 hover:bg-green-600">
-                                      {product.price.toLocaleString('pt-MZ')} MT
-                                    </Badge>
-                                    <span className="text-xs text-gray-400 flex items-center gap-1">
-                                      🏪 {product.provider?.storeName}
-                                    </span>
-                                  </div>
-                                </div>
-                              </div>
-                            </CardContent>
-                          </Card>
-                        </HoverCardTrigger>
-                        <HoverCardContent className="w-72 p-4 shadow-xl" side="top">
-                          <div className="space-y-3">
-                            <h3 className="font-bold text-lg">{product.name}</h3>
-                            <p className="text-sm text-gray-600">{product.description}</p>
-                            <Separator />
-                            <div className="space-y-2">
-                              <div className="flex justify-between items-center">
-                                <span className="text-gray-500">Preço:</span>
-                                <span className="text-xl font-bold text-green-600">{product.price.toLocaleString('pt-MZ')} MT</span>
-                              </div>
-                              <div className="flex items-center gap-2 text-sm text-gray-500">
-                                <span>🏪</span>
-                                <span>{product.provider?.storeName}</span>
-                              </div>
-                              <div className="flex items-center gap-2 text-sm text-gray-500">
-                                <span>📍</span>
-                                <span>{product.provider?.address || 'Maputo'}</span>
-                              </div>
-                              <div className="flex items-center gap-2 text-sm text-gray-500">
-                                <span>📂</span>
-                                <span>{product.provider?.category}</span>
-                              </div>
-                            </div>
-                            <Button 
-                              size="sm" 
-                              className="w-full bg-gradient-to-r from-orange-500 to-red-500" 
-                              onClick={() => addToCart(product)}
-                            >
-                              {user ? '🛒 Adicionar ao Carrinho' : '🔐 Entrar para Pedir'}
-                            </Button>
-                          </div>
-                        </HoverCardContent>
-                      </HoverCard>
-                    ))}
-                  </div>
-                </>
-              )}
-
-              {/* DELIVERY PERSONS TAB - REAL MAP */}
-              {mainTab === 'delivery' && (
-                <>
-                  {/* Real Map */}
-                  <div className="mb-6">
-                    <div className="flex items-center justify-between mb-3">
-                      <h2 className="text-xl font-bold flex items-center gap-2">
-                        🗺️ Mapa em Tempo Real
-                        <Badge className="bg-green-500 animate-pulse">Ao Vivo</Badge>
-                      </h2>
-                    </div>
+            {/* Services/Products */}
+            {mainTab === 'services' && (
+              <>
+                {/* Providers */}
+                <h3 className="font-bold text-lg mb-2 flex items-center gap-2">
+                  🏪 Fornecedores
+                </h3>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-2 mb-4">
+                  {getFilteredProviders().map(provider => {
+                    const distance = userLocation && provider.latitude && provider.longitude
+                      ? calculateDistance(userLocation[0], userLocation[1], provider.latitude, provider.longitude)
+                      : null
+                    const deliveryFee = distance ? calculateDeliveryFee(distance) : null
                     
-                    {mapLoaded && (
-                      <RealMap 
-                        providers={providers}
-                        deliveryPersons={deliveryPersons}
-                        user={user}
-                        onLoginClick={() => setShowAuthModal(true)}
-                      />
-                    )}
-                    
-                    <div className="mt-3 flex flex-wrap gap-4 justify-center text-sm bg-white p-3 rounded-lg shadow">
-                      <div className="flex items-center gap-2">
-                        <span className="w-4 h-4 bg-green-500 rounded-full"></span>
-                        <span>🍴 Restaurantes</span>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <span className="w-4 h-4 bg-green-500 rounded-full"></span>
-                        <span>🍕 Pizzarias</span>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <span className="w-4 h-4 bg-green-500 rounded-full"></span>
-                        <span>🛒 Mercados</span>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <span className="w-4 h-4 bg-emerald-500 rounded-full"></span>
-                        <span>🏍️ Entregadores</span>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <span className="w-4 h-4 bg-blue-500 rounded-full"></span>
-                        <span className="font-medium">📍 Você</span>
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Delivery Persons List */}
-                  <h2 className="text-xl font-bold mb-4 flex items-center gap-2">
-                    🏍️ Entregadores Disponíveis
-                    <Badge className="bg-green-500">{deliveryPersons.length}</Badge>
-                  </h2>
-                  
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    {deliveryPersons.map((dp, index) => (
-                      <Card key={dp.id} className="hover:shadow-lg transition-all">
-                        <CardContent className="p-4">
-                          <div className="flex items-center gap-4">
-                            <div className="w-14 h-14 bg-gradient-to-br from-green-400 to-emerald-600 rounded-full flex items-center justify-center text-white text-2xl shadow-lg">
-                              {vehicleIcons[dp.vehicleType]}
+                    return (
+                      <Card 
+                        key={provider.id} 
+                        className={`cursor-pointer transition-all hover:shadow-md ${selectedProvider?.id === provider.id ? 'ring-2 ring-orange-500' : ''}`}
+                        onClick={() => setSelectedProvider(selectedProvider?.id === provider.id ? null : provider)}
+                      >
+                        <CardContent className="p-3">
+                          <div className="flex items-center gap-3">
+                            <div className="w-12 h-12 bg-gradient-to-br from-orange-200 to-red-200 rounded-lg flex items-center justify-center text-2xl">
+                              {provider.category === 'Restaurante' ? '🍴' : provider.category === 'Pizzaria' ? '🍕' : '🛒'}
                             </div>
-                            <div className="flex-1">
-                              {user ? (
-                                <>
-                                  <p className="font-bold text-lg">{dp.user?.name || `Entregador ${index + 1}`}</p>
-                                  <div className="flex items-center gap-2 text-sm text-gray-500">
-                                    <span className="flex items-center gap-1">
-                                      ⭐ {dp.rating.toFixed(1)}
-                                    </span>
-                                    <span>•</span>
-                                    <span>{dp.totalDeliveries} entregas</span>
-                                  </div>
-                                  <Badge variant={dp.isAvailable ? 'default' : 'secondary'} className={`mt-1 text-xs ${dp.isAvailable ? 'bg-green-500' : ''}`}>
-                                    {dp.isAvailable ? 'Disponível' : 'Ocupado'}
-                                  </Badge>
-                                </>
-                              ) : (
-                                <>
-                                  <div className="flex items-center gap-2">
-                                    <div className="w-3 h-3 bg-gray-400 rounded-full blur-sm"></div>
-                                    <p className="font-bold text-lg text-gray-400">Entregador {index + 1}</p>
-                                    <span className="text-gray-400">🔒</span>
-                                  </div>
-                                  <p className="text-sm text-gray-400">Login necessário para ver detalhes</p>
-                                  <Button 
-                                    size="sm" 
-                                    variant="outline" 
-                                    className="mt-2 text-orange-500 border-orange-500 hover:bg-orange-50"
-                                    onClick={() => setShowAuthModal(true)}
-                                  >
-                                    🔐 Entrar para Ver
-                                  </Button>
-                                </>
+                            <div className="flex-1 min-w-0">
+                              <div className="flex items-center gap-2">
+                                <p className="font-medium truncate">{provider.storeName}</p>
+                                <Badge className={provider.isOpen ? 'bg-green-500' : 'bg-red-500'} variant="secondary">
+                                  {provider.isOpen ? 'Aberto' : 'Fechado'}
+                                </Badge>
+                              </div>
+                              <p className="text-xs text-gray-500">{provider.category} • {provider.products.length} produtos</p>
+                              {distance && (
+                                <p className="text-xs text-orange-600 font-medium">
+                                  📍 {distance.toFixed(1)} km • 🚚 {deliveryFee} MT
+                                </p>
                               )}
                             </div>
                           </div>
                         </CardContent>
                       </Card>
-                    ))}
-                  </div>
-                </>
-              )}
-            </div>
-
-            {/* Sidebar - Delivery Persons (for Services tab) */}
-            {mainTab === 'services' && (
-              <div className="w-80 shrink-0 hidden xl:block">
-                <div className="sticky top-24 space-y-4">
-                  {/* Delivery Persons Card */}
-                  <Card className="shadow-xl overflow-hidden">
-                    <CardHeader className="bg-gradient-to-r from-green-500 to-emerald-600 text-white py-4">
-                      <CardTitle className="text-lg flex items-center gap-2">
-                        🏍️ Entregadores Próximos
-                      </CardTitle>
-                      <CardDescription className="text-green-100">
-                        Disponíveis para entrega
-                      </CardDescription>
-                    </CardHeader>
-                    <CardContent className="p-4">
-                      {deliveryPersons.length === 0 ? (
-                        <p className="text-center text-gray-500 py-6">Nenhum disponível</p>
-                      ) : (
-                        <div className="space-y-3">
-                          {deliveryPersons.slice(0, 4).map((dp, index) => (
-                            <div key={dp.id} className="flex items-center gap-3 p-3 bg-gray-50 rounded-xl hover:bg-gray-100 transition-colors">
-                              <div className="w-12 h-12 bg-gradient-to-br from-green-400 to-emerald-500 rounded-full flex items-center justify-center text-white text-xl shadow-md">
-                                {vehicleIcons[dp.vehicleType]}
-                              </div>
-                              <div className="flex-1 min-w-0">
-                                {user ? (
-                                  <>
-                                    <p className="font-medium truncate">{dp.user?.name || `Entregador ${index + 1}`}</p>
-                                    <p className="text-xs text-gray-500 flex items-center gap-1">
-                                      ⭐ {dp.rating.toFixed(1)} • {dp.totalDeliveries} entregas
-                                    </p>
-                                  </>
-                                ) : (
-                                  <>
-                                    <p className="font-medium text-gray-400 flex items-center gap-2">
-                                      Entregador {index + 1} 🔒
-                                    </p>
-                                    <p className="text-xs text-orange-500">Login para ver detalhes</p>
-                                  </>
-                                )}
-                              </div>
-                              <div className={`w-3 h-3 rounded-full ${dp.isAvailable ? 'bg-green-500' : 'bg-gray-300'}`}></div>
-                            </div>
-                          ))}
-                        </div>
-                      )}
-                      {!user && (
-                        <Button 
-                          size="sm" 
-                          className="w-full mt-4 bg-gradient-to-r from-green-500 to-emerald-600 shadow-md" 
-                          onClick={() => setShowAuthModal(true)}
-                        >
-                          🔐 Entrar para Ver Detalhes
-                        </Button>
-                      )}
-                    </CardContent>
-                  </Card>
-
-                  {/* Stats Card */}
-                  <Card className="shadow-lg">
-                    <CardContent className="p-4">
-                      <div className="grid grid-cols-2 gap-4 text-center">
-                        <div className="p-3 bg-orange-50 rounded-xl">
-                          <p className="text-3xl font-bold text-orange-500">{providers.length}</p>
-                          <p className="text-xs text-gray-500 font-medium">Fornecedores</p>
-                        </div>
-                        <div className="p-3 bg-green-50 rounded-xl">
-                          <p className="text-3xl font-bold text-green-500">{deliveryPersons.length}</p>
-                          <p className="text-xs text-gray-500 font-medium">Entregadores</p>
-                        </div>
-                        <div className="p-3 bg-blue-50 rounded-xl">
-                          <p className="text-3xl font-bold text-blue-500">{allProducts.length}</p>
-                          <p className="text-xs text-gray-500 font-medium">Produtos</p>
-                        </div>
-                        <div className="p-3 bg-purple-50 rounded-xl">
-                          <p className="text-3xl font-bold text-purple-500">24/7</p>
-                          <p className="text-xs text-gray-500 font-medium">Disponível</p>
-                        </div>
-                      </div>
-                    </CardContent>
-                  </Card>
-
-                  {/* Promo Card */}
-                  <Card className="shadow-lg bg-gradient-to-br from-orange-500 to-red-500 text-white overflow-hidden">
-                    <CardContent className="p-4 relative">
-                      <div className="absolute top-0 right-0 text-6xl opacity-20">🎉</div>
-                      <h3 className="font-bold text-lg relative z-10">Primeira Entrega Grátis!</h3>
-                      <p className="text-sm text-white/80 mt-1 relative z-10">Cadastre-se agora e ganhe frete grátis no primeiro pedido.</p>
-                      {!user && (
-                        <Button 
-                          size="sm" 
-                          className="mt-3 bg-white text-orange-500 hover:bg-orange-100 relative z-10" 
-                          onClick={() => setShowAuthModal(true)}
-                        >
-                          Criar Conta Grátis
-                        </Button>
-                      )}
-                    </CardContent>
-                  </Card>
+                    )
+                  })}
                 </div>
-              </div>
+
+                {/* Products */}
+                <h3 className="font-bold text-lg mb-2 flex items-center gap-2">
+                  🍽️ Produtos
+                  {selectedProvider && (
+                    <Button size="sm" variant="ghost" onClick={() => setSelectedProvider(null)}>
+                      ✕ Limpar filtro
+                    </Button>
+                  )}
+                </h3>
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
+                  {getFilteredProducts().map(product => (
+                    <Card key={product.id} className="hover:shadow-md transition-shadow">
+                      <CardContent className="p-3">
+                        <div className="flex gap-3">
+                          <div className="w-16 h-16 bg-gray-100 rounded-lg flex items-center justify-center text-2xl shrink-0">
+                            {product.name.toLowerCase().includes('pizza') ? '🍕' : 
+                             product.name.toLowerCase().includes('coca') ? '🥤' : 
+                             product.name.toLowerCase().includes('hamb') ? '🍔' : '🍽️'}
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <p className="font-medium text-sm truncate">{product.name}</p>
+                            <p className="text-xs text-gray-500 truncate">{product.provider?.storeName}</p>
+                            <div className="flex items-center justify-between mt-1">
+                              <Badge className="bg-green-500">{product.price.toLocaleString('pt-MZ')} MT</Badge>
+                              <Button size="sm" onClick={() => addToCart(product)}>
+                                +
+                              </Button>
+                            </div>
+                          </div>
+                        </div>
+                      </CardContent>
+                    </Card>
+                  ))}
+                </div>
+              </>
             )}
-          </div>
+          </>
         )}
 
         {/* CART VIEW */}
         {view === 'cart' && user && (
           <div className="space-y-4">
             <div className="flex items-center justify-between">
-              <h2 className="text-2xl font-bold">🛒 Carrinho</h2>
-              <Button variant="outline" onClick={() => setView('landing')}>← Continuar Comprando</Button>
+              <h2 className="text-xl font-bold">🛒 Carrinho</h2>
+              <Button variant="outline" size="sm" onClick={() => setView('landing')}>← Voltar</Button>
             </div>
             {cart.length === 0 ? (
-              <Card className="shadow-lg">
-                <CardContent className="py-16 text-center">
-                  <span className="text-6xl mb-4 block">🛒</span>
-                  <p className="text-gray-500 text-lg">Seu carrinho está vazio</p>
-                  <Button className="mt-4 bg-gradient-to-r from-orange-500 to-red-500" onClick={() => setView('landing')}>Ver Produtos</Button>
-                </CardContent>
-              </Card>
+              <Card><CardContent className="py-8 text-center">
+                <p className="text-gray-500">Carrinho vazio</p>
+                <Button className="mt-2 bg-orange-500" onClick={() => setView('landing')}>Ver Produtos</Button>
+              </CardContent></Card>
             ) : (
               <div className="grid md:grid-cols-3 gap-4">
-                <div className="md:col-span-2 space-y-3">
+                <div className="md:col-span-2 space-y-2">
                   {cart.map(item => (
-                    <Card key={item.product.id} className="shadow-md">
-                      <CardContent className="py-4 flex items-center gap-4">
-                        <div className="w-16 h-16 bg-gray-100 rounded-xl flex items-center justify-center text-3xl">🍽️</div>
+                    <Card key={item.product.id}>
+                      <CardContent className="py-3 flex items-center gap-3">
                         <div className="flex-1">
-                          <p className="font-medium text-lg">{item.product.name}</p>
-                          <p className="text-sm text-gray-500">{item.product.price.toLocaleString('pt-MZ')} MT cada</p>
+                          <p className="font-medium">{item.product.name}</p>
+                          <p className="text-sm text-gray-500">{item.product.price.toLocaleString('pt-MZ')} MT</p>
                         </div>
-                        <div className="flex items-center gap-2">
+                        <div className="flex items-center gap-1">
                           <Button size="sm" variant="outline" onClick={() => updateCartQuantity(item.product.id, item.quantity - 1)}>-</Button>
-                          <span className="w-8 text-center font-bold">{item.quantity}</span>
+                          <span className="w-6 text-center">{item.quantity}</span>
                           <Button size="sm" variant="outline" onClick={() => updateCartQuantity(item.product.id, item.quantity + 1)}>+</Button>
                         </div>
-                        <p className="font-bold text-green-600 w-24 text-right">
-                          {(item.product.price * item.quantity).toLocaleString('pt-MZ')} MT
-                        </p>
                       </CardContent>
                     </Card>
                   ))}
                 </div>
-                <Card className="h-fit sticky top-24 shadow-lg">
-                  <CardHeader><CardTitle>📋 Resumo do Pedido</CardTitle></CardHeader>
-                  <CardContent className="space-y-3">
+                <Card className="h-fit sticky top-20">
+                  <CardHeader><CardTitle className="text-base">Resumo</CardTitle></CardHeader>
+                  <CardContent className="space-y-2">
                     <div className="flex justify-between text-sm">
                       <span>Subtotal</span>
                       <span>{getCartTotal().toLocaleString('pt-MZ')} MT</span>
                     </div>
                     <div className="flex justify-between text-sm">
-                      <span>Taxa de Entrega</span>
-                      <span>100 MT</span>
+                      <span>Entrega</span>
+                      <span>{getDeliveryFee()} MT</span>
                     </div>
                     <Separator />
-                    <div className="flex justify-between font-bold text-lg">
+                    <div className="flex justify-between font-bold">
                       <span>Total</span>
-                      <span className="text-green-600">{(getCartTotal() + 100).toLocaleString('pt-MZ')} MT</span>
+                      <span className="text-green-600">{(getCartTotal() + getDeliveryFee()).toLocaleString('pt-MZ')} MT</span>
                     </div>
-                    <Button className="w-full bg-gradient-to-r from-orange-500 to-red-500 shadow-md" onClick={proceedToCheckout}>
-                      Finalizar Pedido →
+                    <Button className="w-full bg-orange-500" onClick={proceedToCheckout}>
+                      Finalizar →
                     </Button>
                   </CardContent>
                 </Card>
@@ -1253,49 +1199,44 @@ export default function Home() {
 
         {/* CHECKOUT VIEW */}
         {view === 'checkout' && user && (
-          <div className="max-w-2xl mx-auto space-y-4">
-            <h2 className="text-2xl font-bold">📍 Finalizar Pedido</h2>
-            <Card className="shadow-lg">
-              <CardHeader><CardTitle className="text-base">📍 Endereço de Entrega</CardTitle></CardHeader>
+          <div className="max-w-lg mx-auto space-y-4">
+            <h2 className="text-xl font-bold">📍 Finalizar</h2>
+            <Card>
+              <CardHeader><CardTitle className="text-sm">Endereço</CardTitle></CardHeader>
               <CardContent>
-                <Textarea placeholder="Digite seu endereço completo..." value={deliveryAddress} onChange={e => setDeliveryAddress(e.target.value)} className="min-h-24" />
+                <Textarea value={deliveryAddress} onChange={e => setDeliveryAddress(e.target.value)} />
               </CardContent>
             </Card>
-            <Card className="shadow-lg">
-              <CardHeader><CardTitle className="text-base">🏍️ Escolha o Entregador</CardTitle></CardHeader>
-              <CardContent className="space-y-3">
-                {availableDeliveryPersons.map((dp, index) => (
+            <Card>
+              <CardHeader><CardTitle className="text-sm">🏍️ Entregador</CardTitle></CardHeader>
+              <CardContent className="space-y-2">
+                {availableDeliveryPersons.slice(0, 3).map((dp, i) => (
                   <div 
                     key={dp.id}
-                    className={`p-4 rounded-xl border-2 cursor-pointer transition-all ${selectedDeliveryPerson?.id === dp.id ? 'border-orange-500 bg-orange-50 shadow-md' : 'border-gray-200 hover:border-orange-300'}`}
+                    className={`p-3 rounded-lg border-2 cursor-pointer ${selectedDeliveryPerson?.id === dp.id ? 'border-orange-500 bg-orange-50' : 'border-gray-200'}`}
                     onClick={() => setSelectedDeliveryPerson(dp)}
                   >
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-3">
-                        <span className="text-3xl">{vehicleIcons[dp.vehicleType]}</span>
-                        <div>
-                          <p className="font-medium">{dp.user?.name || `Entregador ${index + 1}`}</p>
-                          <p className="text-sm text-gray-500">⭐ {dp.rating.toFixed(1)} • {dp.totalDeliveries} entregas</p>
-                        </div>
+                    <div className="flex items-center gap-2">
+                      <span className="text-xl">{vehicleIcons[dp.vehicleType]}</span>
+                      <div>
+                        <p className="font-medium text-sm">{dp.user?.name || `Entregador ${i+1}`}</p>
+                        <p className="text-xs text-gray-500">⭐ {dp.rating.toFixed(1)}</p>
                       </div>
-                      {selectedDeliveryPerson?.id === dp.id && (
-                        <Badge className="bg-orange-500">✓ Selecionado</Badge>
-                      )}
                     </div>
                   </div>
                 ))}
               </CardContent>
             </Card>
-            <Card className="shadow-lg">
-              <CardContent className="py-4 space-y-3">
-                <div className="flex justify-between text-lg font-bold">
+            <Card>
+              <CardContent className="py-3 space-y-2">
+                <div className="flex justify-between font-bold">
                   <span>Total:</span>
-                  <span className="text-green-600">{(getCartTotal() + 100).toLocaleString('pt-MZ')} MT</span>
+                  <span className="text-green-600">{(getCartTotal() + getDeliveryFee()).toLocaleString('pt-MZ')} MT</span>
                 </div>
-                <div className="flex gap-3">
-                  <Button variant="outline" className="flex-1" onClick={() => setView('cart')}>← Voltar</Button>
-                  <Button className="flex-1 bg-gradient-to-r from-orange-500 to-red-500 shadow-md" onClick={createOrder} disabled={loading || !deliveryAddress}>
-                    {loading ? 'Processando...' : 'Confirmar Pedido ✓'}
+                <div className="flex gap-2">
+                  <Button variant="outline" className="flex-1" onClick={() => setView('cart')}>Voltar</Button>
+                  <Button className="flex-1 bg-orange-500" onClick={createOrder} disabled={loading || !deliveryAddress}>
+                    {loading ? '...' : 'Confirmar ✓'}
                   </Button>
                 </div>
               </CardContent>
@@ -1307,65 +1248,45 @@ export default function Home() {
         {view === 'orders' && user && (
           <div className="space-y-4">
             <div className="flex items-center justify-between">
-              <h2 className="text-2xl font-bold">📦 Meus Pedidos</h2>
-              <Button variant="outline" onClick={() => setView('landing')}>← Voltar</Button>
+              <h2 className="text-xl font-bold">📦 Pedidos</h2>
+              <Button variant="outline" size="sm" onClick={() => setView('landing')}>← Voltar</Button>
             </div>
             {orders.length === 0 ? (
-              <Card className="shadow-lg">
-                <CardContent className="py-16 text-center">
-                  <span className="text-6xl mb-4 block">📦</span>
-                  <p className="text-gray-500 text-lg">Você ainda não tem pedidos</p>
-                  <Button className="mt-4 bg-gradient-to-r from-orange-500 to-red-500" onClick={() => setView('landing')}>Fazer Primeiro Pedido</Button>
-                </CardContent>
-              </Card>
+              <Card><CardContent className="py-8 text-center">
+                <p className="text-gray-500">Nenhum pedido</p>
+                <Button className="mt-2 bg-orange-500" onClick={() => setView('landing')}>Fazer Pedido</Button>
+              </CardContent></Card>
             ) : (
-              <div className="space-y-3">
-                {orders.map(order => (
-                  <Card key={order.id} className="overflow-hidden shadow-lg">
-                    <div className={`h-2 ${statusConfig[order.status].color}`} />
-                    <CardContent className="py-4">
-                      <div className="flex items-center justify-between mb-3">
-                        <span className="font-bold text-lg">Pedido #{order.id.slice(-6)}</span>
-                        <Badge className={`${statusConfig[order.status].color} text-white`}>
-                          {statusConfig[order.status].label}
-                        </Badge>
-                      </div>
-                      <div className="space-y-2 mb-3">
-                        {order.items.map(item => (
-                          <div key={item.id} className="flex justify-between text-sm">
-                            <span>{item.quantity}x {item.product.name}</span>
-                            <span>{(item.price * item.quantity).toLocaleString('pt-MZ')} MT</span>
-                          </div>
-                        ))}
-                      </div>
-                      <Separator className="my-3" />
-                      <div className="flex justify-between font-bold text-lg">
-                        <span>Total:</span>
-                        <span className="text-green-600">{(order.totalAmount + order.deliveryFee).toLocaleString('pt-MZ')} MT</span>
-                      </div>
-                    </CardContent>
-                  </Card>
-                ))}
-              </div>
+              orders.map(order => (
+                <Card key={order.id}>
+                  <div className={`h-1 ${statusConfig[order.status].color}`} />
+                  <CardContent className="py-3">
+                    <div className="flex items-center justify-between mb-2">
+                      <span className="font-medium">#{order.id.slice(-6)}</span>
+                      <Badge className={`${statusConfig[order.status].color} text-white text-xs`}>
+                        {statusConfig[order.status].label}
+                      </Badge>
+                    </div>
+                    <div className="space-y-1">
+                      {order.items.map(item => (
+                        <div key={item.id} className="flex justify-between text-sm">
+                          <span>{item.quantity}x {item.product.name}</span>
+                          <span>{(item.price * item.quantity).toLocaleString('pt-MZ')} MT</span>
+                        </div>
+                      ))}
+                    </div>
+                    <Separator className="my-2" />
+                    <div className="flex justify-between font-bold">
+                      <span>Total:</span>
+                      <span className="text-green-600">{(order.totalAmount + order.deliveryFee).toLocaleString('pt-MZ')} MT</span>
+                    </div>
+                  </CardContent>
+                </Card>
+              ))
             )}
           </div>
         )}
       </main>
-
-      {/* Footer */}
-      <footer className="bg-gray-900 text-white py-8 mt-12">
-        <div className="max-w-7xl mx-auto px-4 text-center">
-          <div className="flex items-center justify-center gap-2 mb-4">
-            <span className="text-3xl">🛵</span>
-            <span className="font-bold text-xl">EntregasMoz</span>
-          </div>
-          <p className="text-gray-400 text-sm">Entregas rápidas em toda Moçambique</p>
-          <div className="flex justify-center gap-6 mt-4 text-sm text-gray-400">
-            <span>📞 +258 XX XXX XXXX</span>
-            <span>📧 contato@entregasmoz.co.mz</span>
-          </div>
-        </div>
-      </footer>
     </div>
   )
 }
