@@ -1,7 +1,15 @@
 import { PrismaClient } from '@prisma/client';
 import bcrypt from 'bcryptjs';
+import { randomBytes } from 'crypto';
 
 const prisma = new PrismaClient();
+
+// Gerar QR Code único
+function generateQRCode(prefix: string): string {
+  const random = randomBytes(8).toString('hex').toUpperCase();
+  const timestamp = Date.now().toString(36).toUpperCase();
+  return `${prefix}-${random}-${timestamp}`;
+}
 
 // Cidades de Moçambique
 const cities = [
@@ -59,24 +67,6 @@ const licenses = [
 
 async function main() {
   console.log('🌱 Iniciando seed...');
-
-  // Limpar dados existentes
-  console.log('🗑️ Limpando dados existentes...');
-  await prisma.orderItem.deleteMany();
-  await prisma.order.deleteMany();
-  await prisma.rating.deleteMany();
-  await prisma.transaction.deleteMany();
-  await prisma.payment.deleteMany();
-  await prisma.product.deleteMany();
-  await prisma.deliveryFeeConfig.deleteMany();
-  await prisma.license.deleteMany();
-  await prisma.provider.deleteMany();
-  await prisma.deliveryPerson.deleteMany();
-  await prisma.client.deleteMany();
-  await prisma.admin.deleteMany();
-  await prisma.setting.deleteMany();
-  await prisma.city.deleteMany();
-  await prisma.user.deleteMany();
 
   // Criar cidades
   console.log('🏙️ Criando cidades...');
@@ -146,6 +136,7 @@ async function main() {
     data: [
       { key: 'mpesa_number', value: '+258 84 000 0001', description: 'Número M-Pesa para pagamentos' },
       { key: 'emola_number', value: '+258 86 000 0001', description: 'Número e-Mola para pagamentos' },
+      { key: 'visa_number', value: '**** **** **** 0001', description: 'Referência Visa para pagamentos' },
       { key: 'premium_monthly_fee', value: '500', description: 'Taxa mensal para destaque premium (MT)' },
       { key: 'platform_name', value: 'EntregasMoz', description: 'Nome da plataforma' },
       { key: 'support_phone', value: '+258 84 000 0000', description: 'Telefone de suporte' },
@@ -295,12 +286,18 @@ async function main() {
     }
   }
 
-  // Criar entregadores de exemplo com licença
+  // Criar entregadores de exemplo com licença e QR Code
   console.log('🏍️ Criando entregadores de exemplo...');
   const deliveryLocations = [
     { lat: -25.9100, lng: 32.5200 }, // Zimpeto
     { lat: -25.9700, lng: 32.5900 }, // Costa do Sol
     { lat: -25.9500, lng: 32.5700 }, // Polana
+  ];
+
+  const deliveryVehicles = [
+    { type: 'MOTORCYCLE', plate: 'MG-1234-MF', color: 'Vermelho', brand: 'Honda CG 150' },
+    { type: 'MOTORCYCLE', plate: 'MG-5678-MF', color: 'Azul', brand: 'Yamaha XTZ 150' },
+    { type: 'BICYCLE', plate: 'BC-0001-MP', color: 'Verde', brand: 'Mountain Bike' },
   ];
 
   for (let i = 0; i < 3; i++) {
@@ -318,11 +315,17 @@ async function main() {
     const licenseExpiresAt = new Date();
     licenseExpiresAt.setFullYear(licenseExpiresAt.getFullYear() + 1);
     
+    // Gerar QR Code único para o entregador
+    const qrCode = generateQRCode('DEL');
+    
     await prisma.deliveryPerson.create({
       data: {
         userId: deliveryUser.id,
-        vehicleType: i === 0 ? 'MOTORCYCLE' : i === 1 ? 'BICYCLE' : 'MOTORCYCLE',
-        plateNumber: `MG-${1000 + i}-MF`,
+        vehicleType: deliveryVehicles[i].type as 'MOTORCYCLE' | 'BICYCLE' | 'CAR' | 'SCOOTER',
+        plateNumber: deliveryVehicles[i].plate,
+        vehicleColor: deliveryVehicles[i].color,
+        vehicleBrand: deliveryVehicles[i].brand,
+        qrCode: qrCode,
         isAvailable: i === 0, // Só o primeiro está disponível por padrão
         currentLatitude: deliveryLocations[i].lat,
         currentLongitude: deliveryLocations[i].lng,
@@ -333,6 +336,8 @@ async function main() {
         cityId: maputoCity?.id,
       },
     });
+    
+    console.log(`  ✓ Entregador ${i + 1}: QR Code = ${qrCode}`);
   }
 
   console.log('✅ Seed concluído com sucesso!');
@@ -342,8 +347,14 @@ async function main() {
   console.log(`  - 1 administrador (nachingweya@gmail.com / 123456)`);
   console.log(`  - ${licenses.length} licenças configuradas`);
   console.log(`  - ${allProviders.length} prestadores de exemplo`);
-  console.log(`  - 3 entregadores de exemplo`);
+  console.log(`  - 3 entregadores de exemplo (com QR Code único)`);
   console.log(`  - 1 cliente de exemplo (cliente@teste.com / 123456)`);
+  console.log('');
+  console.log('🔐 Credenciais de Teste:');
+  console.log('  Admin: nachingweya@gmail.com / 123456');
+  console.log('  Cliente: cliente@teste.com / 123456');
+  console.log('  Entregador 1: entregador1@teste.com / 123456');
+  console.log('  Prestador: zimpeto@restaurante.co.mz / 123456');
 }
 
 main()

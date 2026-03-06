@@ -23,6 +23,7 @@ enum OrderStatus {
   PREPARING
   READY
   PICKED_UP
+  IN_TRANSIT
   DELIVERED
   CANCELLED
 }
@@ -52,6 +53,7 @@ enum PaymentMethod {
   MPESA
   EMOLA
   VISA
+  CASH
   MANUAL
 }
 
@@ -62,21 +64,29 @@ enum TransactionType {
   PAYOUT_PROVIDER
   PAYOUT_DELIVERY
   REFUND
+  CASH_COLLECTION
+}
+
+enum ConfirmationType {
+  PICKUP       // Entregador confirma retirada com prestador
+  DELIVERY     // Cliente confirma recebimento
+  CASH_PAYMENT // Entregador confirma pagamento cash
 }
 
 // ============ USUÁRIOS ============
 
 model User {
-  id        String     @id @default(cuid())
-  name      String
-  email     String     @unique
-  password  String
-  phone     String?
-  userType  UserType
-  isActive  Boolean    @default(true)
-  isBlocked Boolean    @default(false)
-  createdAt DateTime   @default(now())
-  updatedAt DateTime   @updatedAt
+  id           String     @id @default(cuid())
+  name         String
+  email        String     @unique
+  password     String
+  phone        String?
+  profileImage String?    // Foto de perfil (base64 ou URL)
+  userType     UserType
+  isActive     Boolean    @default(true)
+  isBlocked    Boolean    @default(false)
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
 
   client         Client?
   deliveryPerson DeliveryPerson?
@@ -87,6 +97,8 @@ model User {
   ratingsReceived Rating[]  @relation("RatingReceiver")
   payments        Payment[]
   transactions    Transaction[]
+  confirmations   OrderConfirmation[] @relation("UserConfirmations")
+  locations       LocationHistory[]
 }
 
 model Admin {
@@ -103,16 +115,16 @@ model Admin {
 }
 
 model Client {
-  id        String   @id @default(cuid())
-  userId    String   @unique
-  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  address   String?
-  latitude  Float?
-  longitude Float?
-  cityId    String?
-  city      City?    @relation(fields: [cityId], references: [id])
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  id           String   @id @default(cuid())
+  userId       String   @unique
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  address      String?
+  latitude     Float?
+  longitude    Float?
+  cityId       String?
+  city         City?    @relation(fields: [cityId], references: [id])
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
 
   orders Order[] @relation("ClientOrders")
 }
@@ -121,8 +133,16 @@ model DeliveryPerson {
   id               String      @id @default(cuid())
   userId           String      @unique
   user             User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  // Veículo - matrícula obrigatória
   vehicleType      VehicleType
-  plateNumber      String?
+  plateNumber      String      // Matrícula obrigatória
+  vehicleColor     String?     // Cor do veículo
+  vehicleBrand     String?     // Marca/modelo
+  
+  // QR Code único do entregador
+  qrCode           String      @unique  // Código QR único para identificação
+  
   isAvailable      Boolean     @default(false)
   currentLatitude  Float?
   currentLongitude Float?
@@ -136,6 +156,9 @@ model DeliveryPerson {
   isPremium        Boolean     @default(false)
   premiumExpiresAt DateTime?
   
+  // Cash em mãos (para pagamentos cash que precisa transferir)
+  cashOnHand       Float       @default(0)
+  
   // Localização
   cityId           String?
   city             City?       @relation(fields: [cityId], references: [id])
@@ -143,8 +166,9 @@ model DeliveryPerson {
   createdAt        DateTime    @default(now())
   updatedAt        DateTime    @updatedAt
 
-  deliveries Order[] @relation("DeliveryPersonOrders")
-  payments   Payment[] @relation("DeliveryPersonPayments")
+  deliveries    Order[] @relation("DeliveryPersonOrders")
+  payments      Payment[] @relation("DeliveryPersonPayments")
+  locations     LocationHistory[] @relation("DeliveryPersonLocations")
 }
 
 model Provider {
@@ -153,6 +177,7 @@ model Provider {
   user             User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   storeName        String
   storeDescription String?
+  storeImage       String?  // Logo/foto da loja
   category         String?
   address          String?
   latitude         Float?
@@ -242,6 +267,9 @@ model Payment {
   deliveryPersonId String?
   deliveryPerson   DeliveryPerson? @relation("DeliveryPersonPayments", fields: [deliveryPersonId], references: [id])
   
+  // Para pagamentos de pedidos
+  orderId          String?
+  
   // Detalhes do pagamento
   amount           Float
   method           PaymentMethod
@@ -259,6 +287,10 @@ model Payment {
   // Tipo de pagamento
   licenseId        String?
   isPremium        Boolean       @default(false)
+  
+  // Para pagamentos cash
+  isCashTransferred Boolean      @default(false)  // Se o cash foi transferido para plataforma
+  cashTransferRef   String?      // Referência da transferência cash
   
   createdAt        DateTime      @default(now())
   updatedAt        DateTime      @updatedAt
@@ -279,6 +311,10 @@ model Order {
   
   status           OrderStatus  @default(PENDING)
   
+  // QR Code do pedido
+  qrCode           String       @unique  // Código QR para confirmações
+  qrCodeExpiresAt  DateTime?             // Expiração do QR Code
+  
   // Valores
   totalAmount      Float
   deliveryFee      Float        @default(0)
@@ -286,14 +322,31 @@ model Order {
   providerAmount   Float        @default(0)  // Valor para o prestador
   deliveryAmount   Float        @default(0)  // Valor para o entregador
   
-  // Endereços
+  // Endereços e coordenadas
   pickupAddress    String?
+  pickupLatitude   Float?
+  pickupLongitude  Float?
   deliveryAddress  String?
+  deliveryLatitude Float?
+  deliveryLongitude Float?
   notes            String?
   
-  // Pagamento confirmado pelo cliente
+  // Forma de pagamento
+  paymentMethod    PaymentMethod @default(MPESA)
   isPaidByClient   Boolean      @default(false)
   clientConfirmedAt DateTime?
+  
+  // Confirmação de retirada pelo entregador (via QR)
+  pickupConfirmedAt   DateTime?
+  pickupConfirmedBy   String?    // ID do entregador que confirmou
+  
+  // Confirmação de entrega pelo cliente (via QR)
+  deliveryConfirmedAt DateTime?
+  
+  // Para pagamentos cash
+  isCashPayment      Boolean     @default(false)
+  cashCollectedAt    DateTime?   // Quando o cash foi coletado
+  cashTransferProof  String?     // Comprovativo de transferência do cash
   
   // Pagamento processado pelo agente
   isProcessed      Boolean      @default(false)
@@ -303,9 +356,11 @@ model Order {
   createdAt        DateTime     @default(now())
   updatedAt        DateTime     @updatedAt
 
-  items        OrderItem[]
-  transactions Transaction[]
-  ratings      Rating[]
+  items         OrderItem[]
+  transactions  Transaction[]
+  ratings       Rating[]
+  confirmations OrderConfirmation[]
+  tracking      OrderTracking[]  // Histórico de posições
 }
 
 model OrderItem {
@@ -316,6 +371,70 @@ model OrderItem {
   product   Product @relation(fields: [productId], references: [id], onDelete: Cascade)
   quantity  Int
   price     Float
+}
+
+// ============ CONFIRMAÇÕES VIA QR CODE ============
+
+model OrderConfirmation {
+  id              String          @id @default(cuid())
+  orderId         String
+  order           Order           @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  
+  // Tipo de confirmação
+  type            ConfirmationType
+  
+  // Quem confirmou
+  confirmedBy     String
+  confirmer       User            @relation("UserConfirmations", fields: [confirmedBy], references: [id])
+  
+  // Dados da confirmação
+  confirmedAt     DateTime        @default(now())
+  latitude        Float?          // Localização onde confirmou
+  longitude       Float?
+  
+  // Para pagamentos cash
+  amount          Float?          // Valor pago (se cash)
+  receiptImage    String?         // Foto do comprovativo (se transferência)
+  
+  notes           String?
+  
+  createdAt       DateTime        @default(now())
+}
+
+// ============ RASTREAMENTO DE TRAJETO ============
+
+model OrderTracking {
+  id          String   @id @default(cuid())
+  orderId     String
+  order       Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  
+  latitude    Float
+  longitude   Float
+  timestamp   DateTime @default(now())
+  
+  // Velocidade e direção (opcional)
+  speed       Float?   // km/h
+  heading     Float?   // graus
+  
+  createdAt   DateTime @default(now())
+}
+
+// ============ HISTÓRICO DE LOCALIZAÇÃO ============
+
+model LocationHistory {
+  id               String   @id @default(cuid())
+  userId           String
+  user             User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  // Para entregadores
+  deliveryPersonId String?
+  deliveryPerson   DeliveryPerson? @relation("DeliveryPersonLocations", fields: [deliveryPersonId], references: [id], onDelete: Cascade)
+  
+  latitude         Float
+  longitude        Float
+  timestamp        DateTime @default(now())
+  
+  createdAt        DateTime @default(now())
 }
 
 // ============ TRANSAÇÕES FINANCEIRAS ============

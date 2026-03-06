@@ -1,6 +1,13 @@
 import { db } from '@/lib/db';
-import { OrderStatus } from '@prisma/client';
+import { OrderStatus, PaymentMethod } from '@prisma/client';
 import { NextResponse } from 'next/server';
+import { randomBytes } from 'crypto';
+
+// Gerar QR Code para pedido
+function generateOrderQRCode(orderId: string): string {
+  const random = randomBytes(6).toString('hex').toUpperCase();
+  return `ORD-${random}-${orderId.slice(-6).toUpperCase()}`;
+}
 
 export async function GET(request: Request) {
   try {
@@ -11,7 +18,7 @@ export async function GET(request: Request) {
     const deliveryPersonId = searchParams.get('deliveryPersonId');
 
     if (orderId) {
-      // Get single order
+      // Get single order with full details
       const order = await db.order.findUnique({
         where: { id: orderId },
         include: {
@@ -21,6 +28,7 @@ export async function GET(request: Request) {
                 select: {
                   name: true,
                   phone: true,
+                  profileImage: true,
                 },
               },
             },
@@ -31,6 +39,7 @@ export async function GET(request: Request) {
                 select: {
                   name: true,
                   phone: true,
+                  profileImage: true,
                 },
               },
             },
@@ -41,6 +50,7 @@ export async function GET(request: Request) {
                 select: {
                   name: true,
                   phone: true,
+                  profileImage: true,
                 },
               },
             },
@@ -48,6 +58,15 @@ export async function GET(request: Request) {
           items: {
             include: {
               product: true,
+            },
+          },
+          tracking: {
+            orderBy: { timestamp: 'desc' },
+            take: 10,
+          },
+          confirmations: {
+            include: {
+              confirmer: { select: { name: true } },
             },
           },
         },
@@ -73,6 +92,8 @@ export async function GET(request: Request) {
             select: {
               storeName: true,
               address: true,
+              latitude: true,
+              longitude: true,
             },
           },
           deliveryPerson: {
@@ -80,6 +101,7 @@ export async function GET(request: Request) {
               user: {
                 select: {
                   name: true,
+                  profileImage: true,
                 },
               },
             },
@@ -102,6 +124,7 @@ export async function GET(request: Request) {
                 select: {
                   name: true,
                   phone: true,
+                  profileImage: true,
                 },
               },
             },
@@ -112,6 +135,7 @@ export async function GET(request: Request) {
                 select: {
                   name: true,
                   phone: true,
+                  profileImage: true,
                 },
               },
             },
@@ -139,6 +163,7 @@ export async function GET(request: Request) {
                 select: {
                   name: true,
                   phone: true,
+                  profileImage: true,
                 },
               },
             },
@@ -149,6 +174,7 @@ export async function GET(request: Request) {
                 select: {
                   name: true,
                   phone: true,
+                  profileImage: true,
                 },
               },
             },
@@ -169,6 +195,7 @@ export async function GET(request: Request) {
               user: {
                 select: {
                   name: true,
+                  profileImage: true,
                 },
               },
             },
@@ -199,10 +226,19 @@ export async function POST(request: Request) {
     const {
       clientId,
       providerId,
+      deliveryPersonId,
       items,
       deliveryAddress,
+      deliveryLatitude,
+      deliveryLongitude,
       pickupAddress,
+      pickupLatitude,
+      pickupLongitude,
       deliveryFee,
+      platformFee,
+      providerAmount,
+      deliveryAmount,
+      paymentMethod,
       notes,
     } = body;
 
@@ -231,14 +267,31 @@ export async function POST(request: Request) {
       });
     }
 
+    // Generate QR Code
+    const tempId = randomBytes(4).toString('hex');
+    const qrCode = generateOrderQRCode(tempId);
+    const qrCodeExpiresAt = new Date();
+    qrCodeExpiresAt.setHours(qrCodeExpiresAt.getHours() + 24);
+
     const order = await db.order.create({
       data: {
         clientId,
         providerId,
+        deliveryPersonId,
         totalAmount,
         deliveryFee: deliveryFee || 100,
+        platformFee: platformFee || 0,
+        providerAmount: providerAmount || totalAmount,
+        deliveryAmount: deliveryAmount || 0,
         pickupAddress,
+        pickupLatitude,
+        pickupLongitude,
         deliveryAddress,
+        deliveryLatitude,
+        deliveryLongitude,
+        paymentMethod: paymentMethod as PaymentMethod || PaymentMethod.MPESA,
+        qrCode,
+        qrCodeExpiresAt,
         notes,
         items: {
           create: orderItems,
@@ -249,6 +302,9 @@ export async function POST(request: Request) {
           include: {
             product: true,
           },
+        },
+        provider: {
+          select: { storeName: true, address: true },
         },
       },
     });
@@ -266,12 +322,18 @@ export async function POST(request: Request) {
 export async function PATCH(request: Request) {
   try {
     const body = await request.json();
-    const { orderId, status, deliveryPersonId } = body;
+    const { orderId, status, deliveryPersonId, isCashPayment, cashTransferProof } = body;
 
     const updateData: Record<string, unknown> = {};
     if (status) updateData.status = status;
     if (deliveryPersonId !== undefined) {
       updateData.deliveryPersonId = deliveryPersonId;
+    }
+    if (isCashPayment !== undefined) {
+      updateData.isCashPayment = isCashPayment;
+    }
+    if (cashTransferProof) {
+      updateData.cashTransferProof = cashTransferProof;
     }
 
     const order = await db.order.update({
@@ -283,6 +345,7 @@ export async function PATCH(request: Request) {
             user: {
               select: {
                 name: true,
+                profileImage: true,
               },
             },
           },
@@ -292,6 +355,7 @@ export async function PATCH(request: Request) {
             user: {
               select: {
                 name: true,
+                profileImage: true,
               },
             },
           },
@@ -301,6 +365,7 @@ export async function PATCH(request: Request) {
             user: {
               select: {
                 name: true,
+                profileImage: true,
               },
             },
           },

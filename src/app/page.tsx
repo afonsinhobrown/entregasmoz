@@ -21,12 +21,13 @@ const TileLayer = dynamic(() => import('react-leaflet').then(mod => mod.TileLaye
 const Marker = dynamic(() => import('react-leaflet').then(mod => mod.Marker), { ssr: false })
 const Popup = dynamic(() => import('react-leaflet').then(mod => mod.Popup), { ssr: false })
 const Circle = dynamic(() => import('react-leaflet').then(mod => mod.Circle), { ssr: false })
+const Polyline = dynamic(() => import('react-leaflet').then(mod => mod.Polyline), { ssr: false })
 
 // Types
 type UserType = 'CLIENT' | 'DELIVERY_PERSON' | 'PROVIDER' | 'ADMIN'
 type OrderStatus = 'PENDING' | 'CONFIRMED' | 'PREPARING' | 'READY' | 'PICKED_UP' | 'DELIVERED' | 'CANCELLED'
 type VehicleType = 'MOTORCYCLE' | 'BICYCLE' | 'CAR' | 'SCOOTER'
-type PaymentMethod = 'MPESA' | 'EMOLA' | 'VISA' | 'MANUAL'
+type PaymentMethod = 'MPESA' | 'EMOLA' | 'VISA' | 'MANUAL' | 'CASH'
 type LicenseType = 'MONTHLY' | 'SEMESTRAL' | 'ANNUAL'
 
 interface User {
@@ -36,6 +37,8 @@ interface User {
   phone?: string
   userType: UserType
   isBlocked?: boolean
+  profileImage?: string
+  qrCode?: string
   client?: { id: string; address?: string; latitude?: number; longitude?: number; cityId?: string }
   deliveryPerson?: { 
     id: string
@@ -49,6 +52,10 @@ interface User {
     licenseExpiresAt?: string
     isPremium?: boolean
     cityId?: string
+    plateNumber?: string
+    vehicleColor?: string
+    vehicleBrand?: string
+    cashOnHand?: number
   }
   provider?: { 
     id: string
@@ -63,6 +70,7 @@ interface User {
     licenseExpiresAt?: string
     isPremium?: boolean
     cityId?: string
+    storeImage?: string
   }
   admin?: { id: string }
 }
@@ -79,6 +87,7 @@ interface Provider {
   licenseExpiresAt?: string
   isPremium?: boolean
   products: Product[]
+  storeImage?: string
 }
 
 interface Product {
@@ -99,12 +108,17 @@ interface DeliveryPerson {
   isAvailable: boolean
   currentLatitude?: number
   currentLongitude?: number
-  user?: { name: string }
+  user?: { name: string; profileImage?: string }
   licenseExpiresAt?: string
   isPremium?: boolean
   distance?: number
   deliveryFee?: number
   estimatedTime?: number
+  plateNumber?: string
+  vehicleColor?: string
+  vehicleBrand?: string
+  cashOnHand?: number
+  qrCode?: string
 }
 
 interface Order {
@@ -117,9 +131,14 @@ interface Order {
   providerId?: string
   deliveryPersonId?: string
   items: { id: string; productId: string; quantity: number; price: number; product: Product }[]
-  provider?: { id: string; storeName: string; storeDescription?: string; category?: string }
-  deliveryPerson?: { id: string; user: { name: string }; rating: number; vehicleType: VehicleType }
+  provider?: { id: string; storeName: string; storeDescription?: string; category?: string; address?: string; latitude?: number; longitude?: number; storeImage?: string }
+  deliveryPerson?: { id: string; user: { name: string; profileImage?: string }; rating: number; vehicleType: VehicleType; plateNumber?: string; vehicleColor?: string; vehicleBrand?: string }
   ratings?: Rating[]
+  qrCode?: string
+  paymentMethod?: PaymentMethod
+  isCashPaid?: boolean
+  transferReceipt?: string
+  trackingPoints?: { latitude: number; longitude: number; timestamp: string }[]
 }
 
 interface CartItem { product: Product; quantity: number }
@@ -194,6 +213,21 @@ interface DeliveryFeeConfig {
   platformCommissionPercent: number
 }
 
+interface TrackingPoint {
+  latitude: number
+  longitude: number
+  timestamp: string
+}
+
+type QRConfirmType = 'PICKUP' | 'DELIVERY' | 'CASH_PAYMENT'
+
+interface QRScanResult {
+  orderId: string
+  type: QRConfirmType
+  order?: Order
+  deliveryPerson?: DeliveryPerson
+}
+
 const statusConfig: Record<OrderStatus, { label: string; color: string }> = {
   PENDING: { label: 'Pendente', color: 'bg-yellow-500' },
   CONFIRMED: { label: 'Confirmado', color: 'bg-blue-500' },
@@ -223,6 +257,7 @@ const paymentMethodLabels: Record<PaymentMethod, string> = {
   EMOLA: '📱 e-Mola',
   VISA: '💳 Visa',
   MANUAL: '📄 Manual (Comprovativo)',
+  CASH: '💵 Dinheiro (Cash)',
 }
 
 const licenseTypeLabels: Record<LicenseType, string> = {
@@ -290,8 +325,20 @@ const getLeaflet = async () => {
 }
 
 // Custom marker icon
-const createCustomIcon = (emoji: string, color: string = 'blue') => {
+const createCustomIcon = (emoji: string, color: string = 'blue', photoUrl?: string) => {
   if (typeof window === 'undefined' || !leafletLib) return null
+  
+  if (photoUrl) {
+    return leafletLib.divIcon({
+      html: `<div style="width: 44px; height: 44px; border-radius: 50%; display: flex; align-items: center; justify-content: center; box-shadow: 0 2px 8px rgba(0,0,0,0.3); border: 3px solid ${color}; overflow: hidden; background: ${color};">
+        <img src="${photoUrl}" style="width: 100%; height: 100%; object-fit: cover; border-radius: 50%;" onerror="this.style.display='none'; this.parentElement.innerHTML='${emoji}'" />
+      </div>`,
+      className: 'custom-marker',
+      iconSize: [44, 44],
+      iconAnchor: [22, 22],
+    })
+  }
+  
   return leafletLib.divIcon({
     html: `<div style="background: ${color}; width: 36px; height: 36px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 18px; box-shadow: 0 2px 8px rgba(0,0,0,0.3); border: 3px solid white;">${emoji}</div>`,
     className: 'custom-marker',
@@ -347,7 +394,10 @@ function RealMap({
   deliveryPersons, 
   user, 
   onLoginClick,
-  onProviderSelect 
+  onProviderSelect,
+  trackingPoints,
+  orderRoute,
+  showRoute
 }: { 
   userLocation: [number, number]
   providers: Provider[]
@@ -355,6 +405,9 @@ function RealMap({
   user: User | null
   onLoginClick: () => void
   onProviderSelect: (provider: Provider) => void
+  trackingPoints?: TrackingPoint[]
+  orderRoute?: { provider: [number, number]; client: [number, number]; deliveryPerson?: [number, number] }
+  showRoute?: boolean
 }) {
   return (
     <div className="h-[500px] rounded-lg overflow-hidden shadow-xl border-2 border-gray-200">
@@ -379,7 +432,7 @@ function RealMap({
         {/* User Location Marker */}
         <Marker 
           position={userLocation}
-          icon={createCustomIcon('📍', '#3B82F6')}
+          icon={createCustomIcon('📍', '#3B82F6', user?.profileImage)}
         >
           <Popup>
             <div className="text-center p-2">
@@ -390,6 +443,32 @@ function RealMap({
             </div>
           </Popup>
         </Marker>
+
+        {/* Order Route Polyline */}
+        {showRoute && orderRoute && (
+          <>
+            {/* Provider to Client route */}
+            <Polyline 
+              positions={[orderRoute.provider, orderRoute.client]}
+              pathOptions={{ color: '#F97316', weight: 3, opacity: 0.7, dashArray: '10, 10' }}
+            />
+            {/* Delivery person to Provider route */}
+            {orderRoute.deliveryPerson && (
+              <Polyline 
+                positions={[orderRoute.deliveryPerson, orderRoute.provider]}
+                pathOptions={{ color: '#22C55E', weight: 3, opacity: 0.7, dashArray: '5, 10' }}
+              />
+            )}
+          </>
+        )}
+
+        {/* Tracking Polyline */}
+        {trackingPoints && trackingPoints.length > 1 && (
+          <Polyline 
+            positions={trackingPoints.map(p => [p.latitude, p.longitude])}
+            pathOptions={{ color: '#8B5CF6', weight: 4, opacity: 0.8 }}
+          />
+        )}
 
         {/* Provider Markers */}
         {providers.filter(p => p.latitude && p.longitude).map((provider) => {
@@ -405,12 +484,19 @@ function RealMap({
             <Marker 
               key={provider.id}
               position={[lat, lng]}
-              icon={createCustomIcon(emoji, color)}
+              icon={createCustomIcon(emoji, color, provider.storeImage)}
             >
               <Popup>
                 <div className="p-2 min-w-56">
-                  <p className="font-bold text-lg">{provider.storeName}</p>
-                  <p className="text-sm text-gray-500">{provider.category}</p>
+                  <div className="flex items-center gap-2 mb-2">
+                    {provider.storeImage && (
+                      <img src={provider.storeImage} alt={provider.storeName} className="w-12 h-12 rounded-lg object-cover" />
+                    )}
+                    <div>
+                      <p className="font-bold text-lg">{provider.storeName}</p>
+                      <p className="text-sm text-gray-500">{provider.category}</p>
+                    </div>
+                  </div>
                   <p className="text-xs mt-1">{provider.address}</p>
                   <div className="flex items-center gap-2 mt-2">
                     <Badge className={provider.isOpen ? 'bg-green-500' : 'bg-red-500'}>
@@ -456,21 +542,36 @@ function RealMap({
             <Marker 
               key={dp.id}
               position={[lat, lng]}
-              icon={createCustomIcon(vehicleIcons[dp.vehicleType], '#10B981')}
+              icon={createCustomIcon(vehicleIcons[dp.vehicleType], '#10B981', dp.user?.profileImage)}
             >
               <Popup>
                 <div className="p-2 min-w-52">
                   {user ? (
                     <>
-                      <p className="font-bold text-lg">{dp.user?.name || 'Entregador'}</p>
-                      <div className="flex items-center gap-1 text-sm">
-                        <span>⭐ {dp.rating.toFixed(1)}</span>
-                        <span>•</span>
-                        <span>{dp.totalDeliveries} entregas</span>
+                      <div className="flex items-center gap-2 mb-2">
+                        {dp.user?.profileImage && (
+                          <img src={dp.user.profileImage} alt={dp.user.name} className="w-10 h-10 rounded-full object-cover" />
+                        )}
+                        <div>
+                          <p className="font-bold text-lg">{dp.user?.name || 'Entregador'}</p>
+                          <div className="flex items-center gap-1 text-sm">
+                            <span>⭐ {dp.rating.toFixed(1)}</span>
+                            <span>•</span>
+                            <span>{dp.totalDeliveries} entregas</span>
+                          </div>
+                        </div>
                       </div>
                       <Badge className={dp.isAvailable ? 'bg-green-500 mt-2' : 'bg-gray-500 mt-2'}>
                         {dp.isAvailable ? 'Disponível' : 'Ocupado'}
                       </Badge>
+                      {dp.plateNumber && (
+                        <p className="text-xs mt-2 text-gray-600">🪪 Matrícula: <span className="font-bold">{dp.plateNumber}</span></p>
+                      )}
+                      {(dp.vehicleColor || dp.vehicleBrand) && (
+                        <p className="text-xs text-gray-600">
+                          🏍️ {dp.vehicleBrand || ''} {dp.vehicleColor || ''}
+                        </p>
+                      )}
                     </>
                   ) : (
                     <p className="font-bold text-gray-400">🔒 Entregador</p>
@@ -515,29 +616,53 @@ function DeliveryPersonTracker({ user, cities, onLicenseRenew }: { user: User; c
   const [todayDeliveries, setTodayDeliveries] = useState(0)
   const [showLicenseModal, setShowLicenseModal] = useState(false)
   const [licenses, setLicenses] = useState<License[]>([])
+  const [pendingOrders, setPendingOrders] = useState<Order[]>([])
+  const [activeOrders, setActiveOrders] = useState<Order[]>([])
+  const [cashOnHand, setCashOnHand] = useState(user.deliveryPerson?.cashOnHand || 0)
+  const [showQRModal, setShowQRModal] = useState(false)
+  const [showScannerModal, setShowScannerModal] = useState(false)
+  const [showCashModal, setShowCashModal] = useState(false)
+  const [scannerInput, setScannerInput] = useState('')
+  const [selectedOrder, setSelectedOrder] = useState<Order | null>(null)
+  const [transferReceipt, setTransferReceipt] = useState('')
+  const [transferAmount, setTransferAmount] = useState(0)
 
   const licenseExpired = isLicenseExpired(user.deliveryPerson?.licenseExpiresAt)
   const daysUntilExpiry = getDaysUntilExpiry(user.deliveryPerson?.licenseExpiresAt)
 
-  // Load today's stats
+  // Load today's stats and orders
   useEffect(() => {
-    const loadStats = async () => {
+    const loadData = async () => {
       if (!user.deliveryPerson?.id) return
       try {
         const res = await fetch(`/api/orders?deliveryPersonId=${user.deliveryPerson.id}`)
         const data = await res.json()
+        const orders = data.orders || []
         const today = new Date().toDateString()
-        const todayOrders = (data.orders || []).filter((o: Order) => 
+        const todayOrders = orders.filter((o: Order) => 
           new Date(o.createdAt).toDateString() === today && o.status === 'DELIVERED'
         )
-        setTodayDeliveries(todayOrders.length)
-        setTodayEarnings(todayOrders.reduce((sum: number, o: Order) => sum + (o.deliveryFee * 0.8), 0))
+        
+        // Separate pending and active orders
+        const pending = orders.filter((o: Order) => o.status === 'READY')
+        const active = orders.filter((o: Order) => ['PICKED_UP', 'CONFIRMED', 'PREPARING'].includes(o.status))
+        
+        setTimeout(() => {
+          setPendingOrders(pending)
+          setActiveOrders(active)
+          setTodayDeliveries(todayOrders.length)
+          setTodayEarnings(todayOrders.reduce((sum: number, o: Order) => sum + (o.deliveryFee * 0.8), 0))
+          
+          // Calculate cash on hand from CASH payments not yet transferred
+          const cashOrders = orders.filter((o: Order) => o.paymentMethod === 'CASH' && o.status === 'DELIVERED' && !o.transferReceipt)
+          setCashOnHand(cashOrders.reduce((sum: number, o: Order) => sum + o.totalAmount + o.deliveryFee, 0))
+        }, 0)
       } catch (error) {
         console.error('Error loading stats:', error)
       }
     }
-    loadStats()
-    const interval = setInterval(loadStats, 30000)
+    loadData()
+    const interval = setInterval(loadData, 30000)
     return () => clearInterval(interval)
   }, [user.deliveryPerson?.id])
 
@@ -556,13 +681,26 @@ function DeliveryPersonTracker({ user, cities, onLicenseRenew }: { user: User; c
           userType: 'DELIVERY_PERSON',
         }),
       }).then(() => {
+        // Also update tracking if there's an active order
+        if (activeOrders.length > 0) {
+          fetch('/api/tracking', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              orderId: activeOrders[0].id,
+              deliveryPersonId: user.deliveryPerson?.id,
+              latitude: location[0],
+              longitude: location[1],
+            }),
+          })
+        }
         setTimeout(() => {
           setLastUpdate(new Date())
           setIsUpdating(false)
         }, 0)
       }).catch(() => setTimeout(() => setIsUpdating(false), 0))
     }
-  }, [location, user.id, user.deliveryPerson?.id, isAvailable])
+  }, [location, user.id, user.deliveryPerson?.id, isAvailable, activeOrders])
 
   // Load licenses
   useEffect(() => {
@@ -597,130 +735,504 @@ function DeliveryPersonTracker({ user, cities, onLicenseRenew }: { user: User; c
     }
   }
 
+  const confirmPickup = async (orderId: string) => {
+    try {
+      const res = await fetch('/api/confirm', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          orderId,
+          type: 'PICKUP',
+          deliveryPersonId: user.deliveryPerson?.id,
+        }),
+      })
+      const data = await res.json()
+      if (data.success) {
+        // Move order from pending to active
+        setPendingOrders(prev => prev.filter(o => o.id !== orderId))
+        const order = pendingOrders.find(o => o.id === orderId)
+        if (order) {
+          setTimeout(() => setActiveOrders(prev => [...prev, { ...order, status: 'PICKED_UP' }]), 0)
+        }
+        setShowScannerModal(false)
+        setScannerInput('')
+        setSelectedOrder(null)
+      }
+    } catch (error) {
+      console.error('Error confirming pickup:', error)
+    }
+  }
+
+  const confirmDelivery = async (orderId: string) => {
+    try {
+      const res = await fetch('/api/confirm', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          orderId,
+          type: 'DELIVERY',
+          deliveryPersonId: user.deliveryPerson?.id,
+        }),
+      })
+      const data = await res.json()
+      if (data.success) {
+        setActiveOrders(prev => prev.filter(o => o.id !== orderId))
+        setShowScannerModal(false)
+        setScannerInput('')
+        setSelectedOrder(null)
+      }
+    } catch (error) {
+      console.error('Error confirming delivery:', error)
+    }
+  }
+
+  const markCashReceived = async (orderId: string) => {
+    try {
+      await fetch('/api/confirm', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          orderId,
+          type: 'CASH_PAYMENT',
+          deliveryPersonId: user.deliveryPerson?.id,
+          isCashPaid: true,
+        }),
+      })
+      // Update local state
+      setActiveOrders(prev => prev.map(o => 
+        o.id === orderId ? { ...o, isCashPaid: true } : o
+      ))
+    } catch (error) {
+      console.error('Error marking cash received:', error)
+    }
+  }
+
+  const submitTransferReceipt = async () => {
+    try {
+      // Submit transfer receipt for cash on hand
+      await fetch('/api/confirm', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          type: 'CASH_PAYMENT',
+          deliveryPersonId: user.deliveryPerson?.id,
+          transferReceipt,
+          amount: transferAmount,
+        }),
+      })
+      setCashOnHand(prev => prev - transferAmount)
+      setShowCashModal(false)
+      setTransferReceipt('')
+      setTransferAmount(0)
+    } catch (error) {
+      console.error('Error submitting transfer:', error)
+    }
+  }
+
+  const handleScanQR = () => {
+    // Simulate QR code scan - look up order by QR code
+    const order = [...pendingOrders, ...activeOrders].find(o => 
+      o.qrCode === scannerInput || o.id === scannerInput || o.id.slice(-6) === scannerInput
+    )
+    if (order) {
+      setSelectedOrder(order)
+    } else {
+      alert('QR Code não encontrado')
+    }
+  }
+
+  // Generate QR Code for delivery person (simplified - just shows ID)
+  const deliveryPersonQR = user.deliveryPerson?.qrCode || `DEL-${user.deliveryPerson?.id?.slice(-8)}`
+
   return (
     <>
-      <Card className="shadow-lg border-2 border-green-200">
-        <CardHeader className="bg-gradient-to-r from-green-500 to-emerald-600 text-white py-4">
-          <CardTitle className="text-xl flex items-center justify-between">
-            <span className="flex items-center gap-2">
-              🏍️ Painel do Entregador
-            </span>
-            <div className="flex items-center gap-2 text-sm">
-              {locationLoading ? (
-                <span className="animate-pulse">📍 Obtendo GPS...</span>
-              ) : locationError ? (
-                <span className="text-yellow-200">⚠️ {locationError}</span>
-              ) : location ? (
-                <span className="flex items-center gap-1">
-                  <span className="w-2 h-2 bg-green-300 rounded-full animate-pulse"></span>
-                  GPS Ativo
-                  {isUpdating && <span className="animate-spin">⚡</span>}
-                </span>
-              ) : null}
+      <div className="space-y-4">
+        {/* Main Panel */}
+        <Card className="shadow-lg border-2 border-green-200">
+          <CardHeader className="bg-gradient-to-r from-green-500 to-emerald-600 text-white py-4">
+            <CardTitle className="text-xl flex items-center justify-between">
+              <span className="flex items-center gap-2">
+                🏍️ Painel do Entregador
+              </span>
+              <div className="flex items-center gap-2 text-sm">
+                {locationLoading ? (
+                  <span className="animate-pulse">📍 Obtendo GPS...</span>
+                ) : locationError ? (
+                  <span className="text-yellow-200">⚠️ {locationError}</span>
+                ) : location ? (
+                  <span className="flex items-center gap-1">
+                    <span className="w-2 h-2 bg-green-300 rounded-full animate-pulse"></span>
+                    GPS Ativo
+                    {isUpdating && <span className="animate-spin">⚡</span>}
+                  </span>
+                ) : null}
+              </div>
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="p-4 space-y-4">
+            {/* License Status */}
+            <div className={`p-3 rounded-lg ${licenseExpired ? 'bg-red-50 border border-red-200' : daysUntilExpiry <= 7 ? 'bg-yellow-50 border border-yellow-200' : 'bg-green-50 border border-green-200'}`}>
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="font-bold text-sm">📜 Licença</p>
+                  <p className={`text-xs ${licenseExpired ? 'text-red-600' : daysUntilExpiry <= 7 ? 'text-yellow-600' : 'text-green-600'}`}>
+                    {licenseExpired ? '❌ Expirada' : `✅ Ativa - ${daysUntilExpiry} dias restantes`}
+                  </p>
+                </div>
+                <Button size="sm" variant={licenseExpired ? 'destructive' : 'outline'} onClick={() => setShowLicenseModal(true)}>
+                  {licenseExpired ? 'Renovar' : 'Ver Planos'}
+                </Button>
+              </div>
             </div>
-          </CardTitle>
-        </CardHeader>
-        <CardContent className="p-4 space-y-4">
-          {/* License Status */}
-          <div className={`p-3 rounded-lg ${licenseExpired ? 'bg-red-50 border border-red-200' : daysUntilExpiry <= 7 ? 'bg-yellow-50 border border-yellow-200' : 'bg-green-50 border border-green-200'}`}>
-            <div className="flex items-center justify-between">
+
+            {/* Status Toggle */}
+            <div className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
               <div>
-                <p className="font-bold text-sm">📜 Licença</p>
-                <p className={`text-xs ${licenseExpired ? 'text-red-600' : daysUntilExpiry <= 7 ? 'text-yellow-600' : 'text-green-600'}`}>
-                  {licenseExpired ? '❌ Expirada' : `✅ Ativa - ${daysUntilExpiry} dias restantes`}
+                <p className="font-bold text-lg">Status</p>
+                <p className={`text-sm font-medium ${isAvailable ? 'text-green-600' : 'text-red-500'}`}>
+                  {isAvailable ? '🟢 Disponível para entregas' : '🔴 Indisponível'}
                 </p>
               </div>
-              <Button size="sm" variant={licenseExpired ? 'destructive' : 'outline'} onClick={() => setShowLicenseModal(true)}>
-                {licenseExpired ? 'Renovar' : 'Ver Planos'}
+              <div className="flex items-center gap-2">
+                <Switch
+                  checked={isAvailable}
+                  onCheckedChange={toggleAvailability}
+                  className="data-[state=checked]:bg-green-500"
+                  disabled={licenseExpired}
+                />
+              </div>
+            </div>
+            
+            {/* Stats Grid */}
+            <div className="grid grid-cols-4 gap-2">
+              <div className="p-3 bg-orange-50 rounded-lg text-center border border-orange-200">
+                <p className="text-2xl font-bold text-orange-500">
+                  {user.deliveryPerson?.totalDeliveries || 0}
+                </p>
+                <p className="text-xs text-gray-500">Total Entregas</p>
+              </div>
+              <div className="p-3 bg-green-50 rounded-lg text-center border border-green-200">
+                <p className="text-2xl font-bold text-green-500">
+                  ⭐ {user.deliveryPerson?.rating.toFixed(1) || '5.0'}
+                </p>
+                <p className="text-xs text-gray-500">Avaliação</p>
+              </div>
+              <div className="p-3 bg-blue-50 rounded-lg text-center border border-blue-200">
+                <p className="text-2xl font-bold text-blue-500">{todayDeliveries}</p>
+                <p className="text-xs text-gray-500">Hoje</p>
+              </div>
+              <div className="p-3 bg-purple-50 rounded-lg text-center border border-purple-200">
+                <p className="text-2xl font-bold text-purple-500">
+                  {todayEarnings.toFixed(0)}
+                </p>
+                <p className="text-xs text-gray-500">MT Hoje</p>
+              </div>
+            </div>
+
+            {/* Cash on Hand */}
+            <div className="p-3 bg-yellow-50 rounded-lg border border-yellow-200">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="font-bold text-sm flex items-center gap-1">💵 Cash em Mãos</p>
+                  <p className="text-lg font-bold text-yellow-700">{cashOnHand.toLocaleString('pt-MZ')} MT</p>
+                </div>
+                {cashOnHand > 0 && (
+                  <Button size="sm" variant="outline" onClick={() => setShowCashModal(true)}>
+                    Transferir
+                  </Button>
+                )}
+              </div>
+            </div>
+
+            {/* Quick Actions */}
+            <div className="grid grid-cols-3 gap-2">
+              <Button variant="outline" className="h-16 flex flex-col gap-1" onClick={() => setShowQRModal(true)}>
+                <span className="text-xl">📱</span>
+                <span className="text-xs">Meu QR</span>
+              </Button>
+              <Button variant="outline" className="h-16 flex flex-col gap-1" onClick={() => setShowScannerModal(true)}>
+                <span className="text-xl">📷</span>
+                <span className="text-xs">Escanear QR</span>
+              </Button>
+              <Button variant="outline" className="h-16 flex flex-col gap-1 relative">
+                <span className="text-xl">📦</span>
+                <span className="text-xs">Pendentes</span>
+                {pendingOrders.length > 0 && (
+                  <Badge className="absolute -top-1 -right-1 bg-red-500">{pendingOrders.length}</Badge>
+                )}
+              </Button>
+            </div>
+
+            {/* Pending Orders */}
+            {pendingOrders.length > 0 && (
+              <Card>
+                <CardHeader className="py-2">
+                  <CardTitle className="text-sm">📦 Pedidos Prontos para Retirada ({pendingOrders.length})</CardTitle>
+                </CardHeader>
+                <CardContent className="max-h-48 overflow-y-auto space-y-2">
+                  {pendingOrders.map(order => (
+                    <div key={order.id} className="p-2 bg-green-50 rounded-lg border border-green-200">
+                      <div className="flex justify-between items-start">
+                        <div>
+                          <p className="font-medium text-sm">#{order.id.slice(-6)}</p>
+                          <p className="text-xs text-gray-500">{order.provider?.storeName}</p>
+                          <p className="text-xs text-green-600 font-medium">
+                            {order.paymentMethod === 'CASH' && '💵 Pagamento em Dinheiro'}
+                          </p>
+                        </div>
+                        <Button size="sm" className="bg-green-500" onClick={() => {
+                          setSelectedOrder(order)
+                          setShowScannerModal(true)
+                        }}>
+                          Retirar
+                        </Button>
+                      </div>
+                    </div>
+                  ))}
+                </CardContent>
+              </Card>
+            )}
+
+            {/* Active Orders */}
+            {activeOrders.length > 0 && (
+              <Card>
+                <CardHeader className="py-2">
+                  <CardTitle className="text-sm">🚚 Entregas em Andamento ({activeOrders.length})</CardTitle>
+                </CardHeader>
+                <CardContent className="max-h-48 overflow-y-auto space-y-2">
+                  {activeOrders.map(order => (
+                    <div key={order.id} className="p-2 bg-blue-50 rounded-lg border border-blue-200">
+                      <div className="flex justify-between items-start">
+                        <div>
+                          <p className="font-medium text-sm">#{order.id.slice(-6)}</p>
+                          <p className="text-xs text-gray-500">{order.deliveryAddress}</p>
+                          <p className="text-xs font-bold text-green-600">
+                            {(order.totalAmount + order.deliveryFee).toLocaleString('pt-MZ')} MT
+                          </p>
+                          <p className="text-xs">
+                            <Badge className={order.paymentMethod === 'CASH' ? 'bg-yellow-500' : 'bg-green-500'}>
+                              {order.paymentMethod === 'CASH' ? '💵 Cash' : '💳 Pago'}
+                            </Badge>
+                            {order.paymentMethod === 'CASH' && !order.isCashPaid && (
+                              <Button size="sm" variant="outline" className="ml-2 text-xs h-6" onClick={() => markCashReceived(order.id)}>
+                                Recebi
+                              </Button>
+                            )}
+                          </p>
+                        </div>
+                        <Badge className={`${statusConfig[order.status].color} text-white`}>
+                          {statusConfig[order.status].label}
+                        </Badge>
+                      </div>
+                    </div>
+                  ))}
+                </CardContent>
+              </Card>
+            )}
+
+            {/* Vehicle Info */}
+            <div className="p-3 bg-gray-50 rounded-lg flex items-center gap-3">
+              <span className="text-3xl">{vehicleIcons[user.deliveryPerson?.vehicleType || 'MOTORCYCLE']}</span>
+              <div className="flex-1">
+                <p className="font-medium">Veículo</p>
+                <p className="text-sm text-gray-500">
+                  {user.deliveryPerson?.vehicleType === 'MOTORCYCLE' ? 'Motocicleta' :
+                   user.deliveryPerson?.vehicleType === 'BICYCLE' ? 'Bicicleta' :
+                   user.deliveryPerson?.vehicleType === 'CAR' ? 'Carro' : 'Scooter'}
+                </p>
+                {user.deliveryPerson?.plateNumber && (
+                  <p className="text-xs text-gray-600">🪪 {user.deliveryPerson.plateNumber}</p>
+                )}
+                {(user.deliveryPerson?.vehicleColor || user.deliveryPerson?.vehicleBrand) && (
+                  <p className="text-xs text-gray-600">
+                    {user.deliveryPerson.vehicleBrand} {user.deliveryPerson.vehicleColor}
+                  </p>
+                )}
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+
+      {/* QR Code Modal */}
+      <Dialog open={showQRModal} onOpenChange={setShowQRModal}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>📱 Seu QR Code</DialogTitle>
+            <DialogDescription>Mostre este código para o cliente confirmar a entrega</DialogDescription>
+          </DialogHeader>
+          <div className="flex flex-col items-center py-4">
+            <div className="w-48 h-48 bg-gray-100 rounded-lg flex items-center justify-center border-2 border-green-500">
+              <div className="text-center">
+                <p className="text-4xl mb-2">📱</p>
+                <p className="font-mono text-xs font-bold">{deliveryPersonQR}</p>
+              </div>
+            </div>
+            <p className="text-sm text-gray-500 mt-4 text-center">
+              O cliente pode escanear este código para ver seus dados e confirmar a entrega
+            </p>
+            {user.profileImage && (
+              <img src={user.profileImage} alt="Profile" className="w-16 h-16 rounded-full mt-4 border-2 border-green-500" />
+            )}
+            <p className="font-medium mt-2">{user.name}</p>
+            <p className="text-sm text-gray-500">⭐ {user.deliveryPerson?.rating.toFixed(1)} • {user.deliveryPerson?.totalDeliveries} entregas</p>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Scanner Modal */}
+      <Dialog open={showScannerModal} onOpenChange={setShowScannerModal}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>📷 Escanear QR Code</DialogTitle>
+            <DialogDescription>
+              Escaneie o QR Code do pedido ou insira o código manualmente
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-4">
+            {!selectedOrder ? (
+              <>
+                {/* Simulated Scanner Input */}
+                <div className="space-y-2">
+                  <Label>Código do Pedido</Label>
+                  <div className="flex gap-2">
+                    <Input 
+                      value={scannerInput}
+                      onChange={e => setScannerInput(e.target.value)}
+                      placeholder="Ex: ABC123 ou ID completo"
+                    />
+                    <Button onClick={handleScanQR}>Buscar</Button>
+                  </div>
+                </div>
+                <div className="text-center text-sm text-gray-500">
+                  <p>ou simule a câmera:</p>
+                  <Button variant="outline" className="mt-2 w-full" onClick={() => {
+                    if (pendingOrders.length > 0) {
+                      setSelectedOrder(pendingOrders[0])
+                    } else if (activeOrders.length > 0) {
+                      setSelectedOrder(activeOrders[0])
+                    }
+                  }}>
+                    📷 Simular Scan do Próximo Pedido
+                  </Button>
+                </div>
+              </>
+            ) : (
+              <>
+                {/* Order Details */}
+                <div className="p-4 bg-gray-50 rounded-lg">
+                  <div className="flex justify-between items-start mb-2">
+                    <p className="font-bold">#{selectedOrder.id.slice(-6)}</p>
+                    <Badge className={`${statusConfig[selectedOrder.status].color} text-white`}>
+                      {statusConfig[selectedOrder.status].label}
+                    </Badge>
+                  </div>
+                  
+                  {selectedOrder.provider && (
+                    <p className="text-sm">🏪 {selectedOrder.provider.storeName}</p>
+                  )}
+                  
+                  <div className="mt-2 space-y-1">
+                    {selectedOrder.items.map(item => (
+                      <p key={item.id} className="text-xs text-gray-600">
+                        {item.quantity}x {item.product.name}
+                      </p>
+                    ))}
+                  </div>
+                  
+                  <Separator className="my-2" />
+                  
+                  <div className="flex justify-between font-bold">
+                    <span>Total:</span>
+                    <span className="text-green-600">
+                      {(selectedOrder.totalAmount + selectedOrder.deliveryFee).toLocaleString('pt-MZ')} MT
+                    </span>
+                  </div>
+                  
+                  {selectedOrder.paymentMethod === 'CASH' && (
+                    <p className="text-sm text-yellow-600 font-bold mt-2">
+                      💵 Pagamento em Dinheiro - Colete do cliente!
+                    </p>
+                  )}
+                </div>
+
+                {/* Action Buttons */}
+                <div className="space-y-2">
+                  {selectedOrder.status === 'READY' && (
+                    <Button 
+                      className="w-full bg-green-500"
+                      onClick={() => confirmPickup(selectedOrder.id)}
+                    >
+                      ✓ Confirmar Retirada
+                    </Button>
+                  )}
+                  {selectedOrder.status === 'PICKED_UP' && (
+                    <Button 
+                      className="w-full bg-blue-500"
+                      onClick={() => confirmDelivery(selectedOrder.id)}
+                    >
+                      ✓ Confirmar Entrega
+                    </Button>
+                  )}
+                  <Button variant="outline" className="w-full" onClick={() => {
+                    setSelectedOrder(null)
+                    setScannerInput('')
+                  }}>
+                    Cancelar
+                  </Button>
+                </div>
+              </>
+            )}
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Cash Transfer Modal */}
+      <Dialog open={showCashModal} onOpenChange={setShowCashModal}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>💵 Transferir Cash</DialogTitle>
+            <DialogDescription>
+              Envie comprovativo da transferência para a plataforma
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-4">
+            <div className="p-3 bg-yellow-50 rounded-lg text-center">
+              <p className="text-sm text-gray-500">Cash em Mãos</p>
+              <p className="text-2xl font-bold text-yellow-700">{cashOnHand.toLocaleString('pt-MZ')} MT</p>
+            </div>
+            
+            <div className="space-y-2">
+              <Label>Valor a Transferir</Label>
+              <Input 
+                type="number"
+                value={transferAmount}
+                onChange={e => setTransferAmount(parseFloat(e.target.value) || 0)}
+                placeholder="Valor em MT"
+              />
+            </div>
+            
+            <div className="space-y-2">
+              <Label>Comprovativo (Base64 ou URL)</Label>
+              <Textarea 
+                value={transferReceipt}
+                onChange={e => setTransferReceipt(e.target.value)}
+                placeholder="Cole o comprovativo aqui..."
+                rows={3}
+              />
+            </div>
+            
+            <div className="flex gap-2">
+              <Button variant="outline" className="flex-1" onClick={() => setShowCashModal(false)}>
+                Cancelar
+              </Button>
+              <Button className="flex-1 bg-green-500" onClick={submitTransferReceipt} disabled={!transferReceipt || transferAmount <= 0}>
+                Enviar
               </Button>
             </div>
           </div>
-
-          {/* Status Toggle */}
-          <div className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
-            <div>
-              <p className="font-bold text-lg">Status</p>
-              <p className={`text-sm font-medium ${isAvailable ? 'text-green-600' : 'text-red-500'}`}>
-                {isAvailable ? '🟢 Disponível para entregas' : '🔴 Indisponível'}
-              </p>
-            </div>
-            <div className="flex items-center gap-2">
-              <Switch
-                checked={isAvailable}
-                onCheckedChange={toggleAvailability}
-                className="data-[state=checked]:bg-green-500"
-                disabled={licenseExpired}
-              />
-            </div>
-          </div>
-          
-          {/* Location Info */}
-          {location && (
-            <div className="p-3 bg-blue-50 rounded-lg">
-              <p className="text-sm font-medium text-blue-800">📍 Localização Atual</p>
-              <p className="font-mono text-xs text-blue-600">
-                Lat: {location[0].toFixed(6)}, Lng: {location[1].toFixed(6)}
-              </p>
-              {lastUpdate && (
-                <p className="text-xs text-blue-500 mt-1">
-                  Atualizado: {lastUpdate.toLocaleTimeString('pt-MZ')}
-                </p>
-              )}
-            </div>
-          )}
-          
-          {/* Stats Grid */}
-          <div className="grid grid-cols-4 gap-2">
-            <div className="p-3 bg-orange-50 rounded-lg text-center border border-orange-200">
-              <p className="text-2xl font-bold text-orange-500">
-                {user.deliveryPerson?.totalDeliveries || 0}
-              </p>
-              <p className="text-xs text-gray-500">Total Entregas</p>
-            </div>
-            <div className="p-3 bg-green-50 rounded-lg text-center border border-green-200">
-              <p className="text-2xl font-bold text-green-500">
-                ⭐ {user.deliveryPerson?.rating.toFixed(1) || '5.0'}
-              </p>
-              <p className="text-xs text-gray-500">Avaliação</p>
-            </div>
-            <div className="p-3 bg-blue-50 rounded-lg text-center border border-blue-200">
-              <p className="text-2xl font-bold text-blue-500">{todayDeliveries}</p>
-              <p className="text-xs text-gray-500">Hoje</p>
-            </div>
-            <div className="p-3 bg-purple-50 rounded-lg text-center border border-purple-200">
-              <p className="text-2xl font-bold text-purple-500">
-                {todayEarnings.toFixed(0)}
-              </p>
-              <p className="text-xs text-gray-500">MT Hoje</p>
-            </div>
-          </div>
-
-          {/* Quick Actions */}
-          <div className="grid grid-cols-2 gap-2">
-            <Button variant="outline" className="h-16 flex flex-col gap-1">
-              <span className="text-xl">📦</span>
-              <span className="text-xs">Pedidos Pendentes</span>
-            </Button>
-            <Button variant="outline" className="h-16 flex flex-col gap-1">
-              <span className="text-xl">📊</span>
-              <span className="text-xs">Histórico</span>
-            </Button>
-          </div>
-
-          {/* Vehicle Info */}
-          <div className="p-3 bg-gray-50 rounded-lg flex items-center gap-3">
-            <span className="text-3xl">{vehicleIcons[user.deliveryPerson?.vehicleType || 'MOTORCYCLE']}</span>
-            <div>
-              <p className="font-medium">Veículo</p>
-              <p className="text-sm text-gray-500">
-                {user.deliveryPerson?.vehicleType === 'MOTORCYCLE' ? 'Motocicleta' :
-                 user.deliveryPerson?.vehicleType === 'BICYCLE' ? 'Bicicleta' :
-                 user.deliveryPerson?.vehicleType === 'CAR' ? 'Carro' : 'Scooter'}
-              </p>
-            </div>
-          </div>
-        </CardContent>
-      </Card>
+        </DialogContent>
+      </Dialog>
 
       {/* License Payment Modal */}
       <Dialog open={showLicenseModal} onOpenChange={setShowLicenseModal}>
@@ -1265,6 +1777,8 @@ function ProviderDashboard({ user, providers, onRefresh }: { user: User; provide
   const [selectedLicense, setSelectedLicense] = useState<License | null>(null)
   const [selectedPaymentMethod, setSelectedPaymentMethod] = useState<PaymentMethod>('MPESA')
   const [showPaymentModal, setShowPaymentModal] = useState(false)
+  const [showQRModal, setShowQRModal] = useState(false)
+  const [selectedOrderForQR, setSelectedOrderForQR] = useState<Order | null>(null)
 
   const provider = providers.find(p => p.id === user.provider?.id)
   const licenseExpired = isLicenseExpired(user.provider?.licenseExpiresAt)
@@ -1429,6 +1943,17 @@ function ProviderDashboard({ user, providers, onRefresh }: { user: User; provide
                         Pronto
                       </Button>
                     )}
+                    {order.status === 'READY' && (
+                      <Button size="sm" className="bg-purple-500" onClick={() => {
+                        setSelectedOrderForQR(order)
+                        setShowQRModal(true)
+                      }}>
+                        📱 Ver QR Code
+                      </Button>
+                    )}
+                    {order.paymentMethod === 'CASH' && (
+                      <Badge className="bg-yellow-500">💵 Cash</Badge>
+                    )}
                   </div>
                 </div>
               ))}
@@ -1530,6 +2055,49 @@ function ProviderDashboard({ user, providers, onRefresh }: { user: User; provide
               Confirmar Pagamento
             </Button>
           </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* QR Code Modal for Order */}
+      <Dialog open={showQRModal} onOpenChange={setShowQRModal}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>📱 QR Code do Pedido</DialogTitle>
+            <DialogDescription>
+              Mostre este código para o entregador escanear
+            </DialogDescription>
+          </DialogHeader>
+          {selectedOrderForQR && (
+            <div className="flex flex-col items-center py-4">
+              <div className="w-48 h-48 bg-gray-100 rounded-lg flex items-center justify-center border-2 border-purple-500">
+                <div className="text-center">
+                  <p className="text-4xl mb-2">📦</p>
+                  <p className="font-mono text-xs font-bold">#{selectedOrderForQR.id.slice(-6)}</p>
+                  <p className="text-xs text-gray-500 mt-1">{selectedOrderForQR.qrCode || `ORD-${selectedOrderForQR.id.slice(-8)}`}</p>
+                </div>
+              </div>
+              <p className="text-sm text-gray-500 mt-4 text-center">
+                O entregador deve escanear este código para confirmar a retirada
+              </p>
+              <div className="mt-4 p-3 bg-gray-50 rounded-lg w-full">
+                <p className="text-sm font-medium">Pedido #{selectedOrderForQR.id.slice(-6)}</p>
+                <div className="mt-2 space-y-1">
+                  {selectedOrderForQR.items.map(item => (
+                    <p key={item.id} className="text-xs text-gray-600">
+                      {item.quantity}x {item.product.name}
+                    </p>
+                  ))}
+                </div>
+                <Separator className="my-2" />
+                <p className="font-bold text-green-600">
+                  Total: {(selectedOrderForQR.totalAmount + selectedOrderForQR.deliveryFee).toLocaleString('pt-MZ')} MT
+                </p>
+                {selectedOrderForQR.paymentMethod === 'CASH' && (
+                  <Badge className="bg-yellow-500 mt-2">💵 Pagamento em Dinheiro</Badge>
+                )}
+              </div>
+            </div>
+          )}
         </DialogContent>
       </Dialog>
     </div>
@@ -1668,8 +2236,11 @@ export default function Home() {
   const [registerForm, setRegisterForm] = useState({
     name: '', email: '', password: '', phone: '', userType: 'CLIENT' as UserType,
     address: '', vehicleType: 'MOTORCYCLE' as VehicleType, plateNumber: '',
+    vehicleColor: '', vehicleBrand: '',
     storeName: '', storeDescription: '', category: '', storeAddress: '',
     cityId: '',
+    profileImage: '',
+    storeImage: '',
   })
   const [loginForm, setLoginForm] = useState({ email: '', password: '' })
   
@@ -1690,6 +2261,7 @@ export default function Home() {
   const [selectedProvider, setSelectedProvider] = useState<Provider | null>(null)
   const [showRatingModal, setShowRatingModal] = useState(false)
   const [ratingOrder, setRatingOrder] = useState<Order | null>(null)
+  const [selectedPaymentMethod, setSelectedPaymentMethod] = useState<PaymentMethod>('MPESA')
 
   const { location: userLocation, loading: locationLoading } = useLocation()
 
@@ -1798,9 +2370,17 @@ export default function Home() {
   const register = async () => {
     setLoading(true)
     try {
+      // Validate required fields
+      if (registerForm.userType === 'DELIVERY_PERSON' && !registerForm.plateNumber) {
+        alert('Matrícula é obrigatória para entregadores!')
+        setLoading(false)
+        return
+      }
+      
       const body: Record<string, unknown> = {
         name: registerForm.name, email: registerForm.email, password: registerForm.password,
         phone: registerForm.phone, userType: registerForm.userType,
+        profileImage: registerForm.profileImage,
       }
       if (registerForm.userType === 'CLIENT') {
         body.address = registerForm.address
@@ -1808,7 +2388,9 @@ export default function Home() {
       }
       else if (registerForm.userType === 'DELIVERY_PERSON') {
         body.vehicleType = registerForm.vehicleType
-        body.plateNumber = registerForm.plateNumber
+        body.plateNumber = registerForm.plateNumber // Required
+        body.vehicleColor = registerForm.vehicleColor // Optional
+        body.vehicleBrand = registerForm.vehicleBrand // Optional
         body.cityId = registerForm.cityId
       } else if (registerForm.userType === 'PROVIDER') {
         body.storeName = registerForm.storeName
@@ -1816,6 +2398,7 @@ export default function Home() {
         body.category = registerForm.category
         body.storeAddress = registerForm.storeAddress
         body.cityId = registerForm.cityId
+        body.storeImage = registerForm.storeImage
       }
 
       const res = await fetch('/api/auth/register', {
@@ -1963,6 +2546,7 @@ export default function Home() {
           deliveryAddress,
           deliveryFee,
           deliveryPersonId: selectedDeliveryPerson?.id,
+          paymentMethod: selectedPaymentMethod,
         }),
       })
       const data = await res.json()
@@ -2120,6 +2704,31 @@ export default function Home() {
             </TabsContent>
 
             <TabsContent value="register" className="space-y-3 mt-3">
+              {/* Photo Upload for All Users */}
+              <div className="space-y-1">
+                <Label>Foto de Perfil</Label>
+                <div className="flex gap-2 items-center">
+                  {registerForm.profileImage && (
+                    <img src={registerForm.profileImage} alt="Preview" className="w-16 h-16 rounded-full object-cover border-2 border-orange-500" />
+                  )}
+                  <Input 
+                    type="file" 
+                    accept="image/*" 
+                    onChange={e => {
+                      const file = e.target.files?.[0]
+                      if (file) {
+                        const reader = new FileReader()
+                        reader.onloadend = () => {
+                          setRegisterForm({ ...registerForm, profileImage: reader.result as string })
+                        }
+                        reader.readAsDataURL(file)
+                      }
+                    }}
+                    className="flex-1"
+                  />
+                </div>
+              </div>
+
               <div className="space-y-1">
                 <Label>Tipo de Conta</Label>
                 <Select value={registerForm.userType} onValueChange={(v) => setRegisterForm({ ...registerForm, userType: v as UserType })}>
@@ -2183,8 +2792,32 @@ export default function Home() {
                     </Select>
                   </div>
                   <div className="space-y-1">
-                    <Label>Matrícula</Label>
-                    <Input value={registerForm.plateNumber} onChange={e => setRegisterForm({ ...registerForm, plateNumber: e.target.value })} />
+                    <Label>Matrícula <span className="text-red-500">*</span></Label>
+                    <Input 
+                      value={registerForm.plateNumber} 
+                      onChange={e => setRegisterForm({ ...registerForm, plateNumber: e.target.value })}
+                      placeholder="Obrigatório"
+                      className={!registerForm.plateNumber ? 'border-red-300' : ''}
+                    />
+                    {!registerForm.plateNumber && <p className="text-xs text-red-500">Campo obrigatório</p>}
+                  </div>
+                  <div className="grid grid-cols-2 gap-2">
+                    <div className="space-y-1">
+                      <Label>Marca do Veículo <span className="text-gray-400 text-xs">(opcional)</span></Label>
+                      <Input 
+                        value={registerForm.vehicleBrand} 
+                        onChange={e => setRegisterForm({ ...registerForm, vehicleBrand: e.target.value })}
+                        placeholder="Ex: Honda"
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <Label>Cor do Veículo <span className="text-gray-400 text-xs">(opcional)</span></Label>
+                      <Input 
+                        value={registerForm.vehicleColor} 
+                        onChange={e => setRegisterForm({ ...registerForm, vehicleColor: e.target.value })}
+                        placeholder="Ex: Vermelho"
+                      />
+                    </div>
                   </div>
                 </>
               )}
@@ -2207,8 +2840,31 @@ export default function Home() {
                     </Select>
                   </div>
                   <div className="space-y-1">
-                    <Label>Endereço</Label>
+                    <Label>Endereço da Loja</Label>
                     <Input value={registerForm.storeAddress} onChange={e => setRegisterForm({ ...registerForm, storeAddress: e.target.value })} />
+                  </div>
+                  <div className="space-y-1">
+                    <Label>Foto da Loja</Label>
+                    <div className="flex gap-2 items-center">
+                      {registerForm.storeImage && (
+                        <img src={registerForm.storeImage} alt="Preview" className="w-16 h-16 rounded-lg object-cover border-2 border-green-500" />
+                      )}
+                      <Input 
+                        type="file" 
+                        accept="image/*" 
+                        onChange={e => {
+                          const file = e.target.files?.[0]
+                          if (file) {
+                            const reader = new FileReader()
+                            reader.onloadend = () => {
+                              setRegisterForm({ ...registerForm, storeImage: reader.result as string })
+                            }
+                            reader.readAsDataURL(file)
+                          }
+                        }}
+                        className="flex-1"
+                      />
+                    </div>
                   </div>
                 </>
               )}
@@ -2571,6 +3227,35 @@ export default function Home() {
               </CardContent>
             </Card>
 
+            {/* Payment Method Selection */}
+            <Card>
+              <CardHeader><CardTitle className="text-sm">💳 Método de Pagamento</CardTitle></CardHeader>
+              <CardContent>
+                <div className="grid grid-cols-2 gap-2">
+                  {(['MPESA', 'EMOLA', 'VISA', 'CASH'] as PaymentMethod[]).map(method => (
+                    <Button
+                      key={method}
+                      variant={selectedPaymentMethod === method ? 'default' : 'outline'}
+                      className={`h-16 flex flex-col gap-1 ${selectedPaymentMethod === method ? 'bg-green-500' : ''}`}
+                      onClick={() => setSelectedPaymentMethod(method)}
+                    >
+                      <span className="text-lg">
+                        {method === 'MPESA' ? '📱' : method === 'EMOLA' ? '📱' : method === 'VISA' ? '💳' : '💵'}
+                      </span>
+                      <span className="text-xs">{paymentMethodLabels[method]}</span>
+                    </Button>
+                  ))}
+                </div>
+                {selectedPaymentMethod === 'CASH' && (
+                  <div className="mt-3 p-3 bg-yellow-50 rounded-lg border border-yellow-200">
+                    <p className="text-sm text-yellow-800">
+                      💵 Você pagará em dinheiro no momento da entrega. Prepare o valor exato!
+                    </p>
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+
             {/* Delivery Person Selection */}
             <Card>
               <CardHeader>
@@ -2593,8 +3278,12 @@ export default function Home() {
                         onClick={() => setSelectedDeliveryPerson(dp)}
                       >
                         <div className="flex items-center gap-3">
-                          <div className="w-12 h-12 bg-gradient-to-br from-green-400 to-emerald-600 rounded-full flex items-center justify-center text-2xl">
-                            {vehicleIcons[dp.vehicleType]}
+                          <div className="w-12 h-12 bg-gradient-to-br from-green-400 to-emerald-600 rounded-full flex items-center justify-center text-2xl overflow-hidden">
+                            {dp.user?.profileImage ? (
+                              <img src={dp.user.profileImage} alt={dp.user.name} className="w-full h-full object-cover" />
+                            ) : (
+                              vehicleIcons[dp.vehicleType]
+                            )}
                           </div>
                           <div className="flex-1">
                             <p className="font-medium">{dp.user?.name || 'Entregador'}</p>
@@ -2611,6 +3300,7 @@ export default function Home() {
                         <div className="flex items-center gap-4 mt-2 text-xs text-gray-500">
                           <span>📍 {(dp.distance || 0).toFixed(1)} km de distância</span>
                           <span>🏍️ {dp.vehicleType === 'MOTORCYCLE' ? 'Motocicleta' : dp.vehicleType === 'BICYCLE' ? 'Bicicleta' : dp.vehicleType === 'CAR' ? 'Carro' : 'Scooter'}</span>
+                          {dp.plateNumber && <span>🪪 {dp.plateNumber}</span>}
                         </div>
                       </div>
                     ))
@@ -2646,6 +3336,11 @@ export default function Home() {
                   <span className="text-green-600">
                     {(getCartTotal() + (selectedDeliveryPerson?.deliveryFee || getDeliveryFee())).toLocaleString('pt-MZ')} MT
                   </span>
+                </div>
+                <div className="mt-2">
+                  <Badge className={selectedPaymentMethod === 'CASH' ? 'bg-yellow-500' : 'bg-green-500'}>
+                    {paymentMethodLabels[selectedPaymentMethod]}
+                  </Badge>
                 </div>
               </CardContent>
             </Card>
