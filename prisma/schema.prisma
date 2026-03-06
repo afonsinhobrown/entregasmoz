@@ -1,0 +1,142 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+enum UserType {
+  CLIENT
+  DELIVERY_PERSON
+  PROVIDER
+}
+
+enum OrderStatus {
+  PENDING
+  CONFIRMED
+  PREPARING
+  READY
+  PICKED_UP
+  DELIVERED
+  CANCELLED
+}
+
+enum VehicleType {
+  MOTORCYCLE
+  BICYCLE
+  CAR
+  SCOOTER
+}
+
+model User {
+  id        String     @id @default(cuid())
+  name      String
+  email     String     @unique
+  password  String
+  phone     String?
+  userType  UserType
+  createdAt DateTime   @default(now())
+  updatedAt DateTime   @updatedAt
+
+  client         Client?
+  deliveryPerson DeliveryPerson?
+  provider       Provider?
+}
+
+model Client {
+  id        String   @id @default(cuid())
+  userId    String   @unique
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  address   String?
+  latitude  Float?
+  longitude Float?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  orders Order[] @relation("ClientOrders")
+}
+
+model DeliveryPerson {
+  id               String      @id @default(cuid())
+  userId           String      @unique
+  user             User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  vehicleType      VehicleType
+  plateNumber      String?
+  isAvailable      Boolean     @default(false)
+  currentLatitude  Float?
+  currentLongitude Float?
+  rating           Float       @default(5.0)
+  totalDeliveries  Int         @default(0)
+  createdAt        DateTime    @default(now())
+  updatedAt        DateTime    @updatedAt
+
+  deliveries Order[] @relation("DeliveryPersonOrders")
+}
+
+model Provider {
+  id               String   @id @default(cuid())
+  userId           String   @unique
+  user             User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  storeName        String
+  storeDescription String?
+  category         String?
+  address          String?
+  latitude         Float?
+  longitude        Float?
+  isOpen           Boolean  @default(true)
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  products Product[] @relation("ProviderProducts")
+  orders   Order[]   @relation("ProviderOrders")
+}
+
+model Product {
+  id          String   @id @default(cuid())
+  providerId  String
+  provider    Provider @relation("ProviderProducts", fields: [providerId], references: [id], onDelete: Cascade)
+  name        String
+  description String?
+  price       Float
+  image       String?
+  isAvailable Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  orderItems OrderItem[]
+}
+
+model Order {
+  id               String       @id @default(cuid())
+  clientId         String
+  client           Client       @relation("ClientOrders", fields: [clientId], references: [id], onDelete: Cascade)
+  providerId       String
+  provider         Provider     @relation("ProviderOrders", fields: [providerId], references: [id], onDelete: Cascade)
+  deliveryPersonId String?
+  deliveryPerson   DeliveryPerson? @relation("DeliveryPersonOrders", fields: [deliveryPersonId], references: [id], onDelete: SetNull)
+  status           OrderStatus  @default(PENDING)
+  totalAmount      Float
+  deliveryFee      Float        @default(0)
+  pickupAddress    String?
+  deliveryAddress  String?
+  notes            String?
+  createdAt        DateTime     @default(now())
+  updatedAt        DateTime     @updatedAt
+
+  items OrderItem[]
+}
+
+model OrderItem {
+  id        String  @id @default(cuid())
+  orderId   String
+  order     Order   @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  productId String
+  product   Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+  quantity  Int
+  price     Float
+}
