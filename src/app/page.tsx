@@ -161,6 +161,20 @@ interface License {
   durationDays: number
   description?: string
   isActive: boolean
+  // Novos campos para planos
+  targetUserType?: 'PROVIDER' | 'DELIVERY_PERSON' | 'BOTH'
+  isTrial?: boolean
+  isFree?: boolean
+  transactionFeePercent?: number
+  ordersIncluded?: number
+  orderExcessFee?: number
+  productsLimit?: number
+  hasHighlight?: boolean
+  hasPriority?: boolean
+  deliveriesIncluded?: number
+  deliveryExcessFee?: number
+  hasInsurance?: boolean
+  hasVerifiedBadge?: boolean
 }
 
 interface Payment {
@@ -345,6 +359,33 @@ const createCustomIcon = (emoji: string, color: string = 'blue', photoUrl?: stri
     iconSize: [36, 36],
     iconAnchor: [18, 18],
   })
+}
+
+// Mini map marker component that ensures leaflet is loaded
+function MiniMapMarker({ position }: { position: [number, number] }) {
+  const [icon, setIcon] = useState<L.DivIcon | null>(null)
+  
+  useEffect(() => {
+    getLeaflet().then(() => {
+      const newIcon = createCustomIcon('🏍️', '#10B981')
+      setTimeout(() => setIcon(newIcon), 0)
+    })
+  }, [])
+  
+  if (!icon) return null
+  
+  return (
+    <Marker position={position} icon={icon}>
+      <Popup>
+        <div className="text-center p-2">
+          <p className="font-bold">📍 Você está aqui</p>
+          <p className="text-xs text-gray-500">
+            {position[0].toFixed(4)}, {position[1].toFixed(4)}
+          </p>
+        </div>
+      </Popup>
+    </Marker>
+  )
 }
 
 // Location Hook
@@ -2913,19 +2954,7 @@ export default function Home() {
                         radius={200}
                         pathOptions={{ color: '#10B981', fillColor: '#10B981', fillOpacity: 0.2 }}
                       />
-                      <Marker 
-                        position={userLocation}
-                        icon={createCustomIcon('🏍️', '#10B981')}
-                      >
-                        <Popup>
-                          <div className="text-center p-2">
-                            <p className="font-bold">📍 Você está aqui</p>
-                            <p className="text-xs text-gray-500">
-                              {userLocation[0].toFixed(4)}, {userLocation[1].toFixed(4)}
-                            </p>
-                          </div>
-                        </Popup>
-                      </Marker>
+                      <MiniMapMarker position={userLocation} />
                     </MapContainer>
                   </div>
                 </CardContent>

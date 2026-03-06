@@ -36,9 +36,16 @@ enum VehicleType {
 }
 
 enum LicenseType {
-  MONTHLY
-  SEMESTRAL
-  ANNUAL
+  TRIAL     // 10 dias, renovável, pode ser free ou pago
+  STARTER   // Plano básico para prestadores
+  GROW      // Plano médio para prestadores
+  PRO       // Plano premium para prestadores
+  BASIC     // Plano básico para entregadores
+  ACTIVE    // Plano médio para entregadores
+  TOP       // Plano premium para entregadores
+  MONTHLY   // Legado
+  SEMESTRAL // Legado
+  ANNUAL    // Legado
 }
 
 enum PaymentStatus {
@@ -242,11 +249,39 @@ model License {
   id              String       @id @default(cuid())
   name            String
   type            LicenseType
-  priceProvider   Float        // Preço para prestador
-  priceDelivery   Float        // Preço para entregador
+  
+  // Preços
+  priceProvider   Float        @default(0)  // Preço para prestador
+  priceDelivery   Float        @default(0)  // Preço para entregador
   durationDays    Int          // Duração em dias
   description     String?
   isActive        Boolean      @default(true)
+  
+  // Target user type
+  targetUserType  String?       @default("BOTH") // PROVIDER, DELIVERY_PERSON, BOTH
+  
+  // Trial settings
+  isTrial         Boolean      @default(false)
+  isFree          Boolean      @default(false)  // Admin decide se é gratuito ou pago
+  
+  // Transaction fees
+  transactionFeePercent Float @default(5)  // % taxa por transação
+  
+  // Limits for providers
+  ordersIncluded      Int?         // Pedidos incluídos por mês
+  orderExcessFee      Float?       @default(10) // Taxa por pedido excedente
+  productsLimit       Int?         // Limite de produtos no catálogo
+  
+  // Limits for delivery persons
+  deliveriesIncluded  Int?         // Entregas incluídas por mês
+  deliveryExcessFee   Float?       @default(6) // Taxa por entrega excedente
+  
+  // Features
+  hasHighlight        Boolean      @default(false) // Destaque na plataforma
+  hasPriority         Boolean      @default(false) // Prioridade em pedidos
+  hasInsurance        Boolean      @default(false) // Seguro por entrega
+  hasVerifiedBadge    Boolean      @default(false) // Badge verificado
+  
   createdAt       DateTime     @default(now())
   updatedAt       DateTime     @updatedAt
 

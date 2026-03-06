@@ -37,31 +37,235 @@ const cities = [
   { name: 'Bela Vista', province: 'Maputo Província', latitude: -26.1000, longitude: 32.9000 },
 ];
 
-// Licenças padrão
+// Licenças - Planos para Prestadores e Entregadores
 const licenses = [
+  // =====================
+  // TRIAL - 10 dias renovável (Admin decide se é free ou pago)
+  // =====================
   {
-    name: 'Licença Mensal',
-    type: 'MONTHLY',
+    name: 'Trial (10 dias)',
+    type: 'TRIAL',
+    targetUserType: 'BOTH',
+    priceProvider: 0,      // Admin pode definir como free ou pago
+    priceDelivery: 0,      // Admin pode definir como free ou pago
+    durationDays: 10,
+    description: 'Licença de teste de 10 dias - pode ser renovada. O administrador decide se é gratuita ou paga.',
+    isActive: true,
+    isTrial: true,
+    isFree: true,          // Pode ser alterado pelo admin
+    transactionFeePercent: 5,
+    ordersIncluded: 20,
+    orderExcessFee: 10,
+    deliveriesIncluded: 20,
+    deliveryExcessFee: 6,
+  },
+  
+  // =====================
+  // PLANOS PARA PRESTADORES
+  // =====================
+  {
+    name: 'Starter',
+    type: 'STARTER',
+    targetUserType: 'PROVIDER',
+    priceProvider: 300,
+    priceDelivery: 0,
+    durationDays: 30,
+    description: 'Ideal para negócios novos ou que estão a testar a plataforma. Até 60 pedidos/mês.',
+    isActive: true,
+    isTrial: false,
+    transactionFeePercent: 4.5,
+    ordersIncluded: 60,
+    orderExcessFee: 10,
+    productsLimit: 30,
+    hasHighlight: false,
+  },
+  {
+    name: 'Grow',
+    type: 'GROW',
+    targetUserType: 'PROVIDER',
+    priceProvider: 750,
+    priceDelivery: 0,
+    durationDays: 30,
+    description: 'O plano âncora, pensado para o volume médio de 51-300 pedidos. Destaque ocasional.',
+    isActive: true,
+    isTrial: false,
+    transactionFeePercent: 3,
+    ordersIncluded: 200,
+    orderExcessFee: 7,
+    productsLimit: 150,
+    hasHighlight: true,
+  },
+  {
+    name: 'Pro',
+    type: 'PRO',
+    targetUserType: 'PROVIDER',
     priceProvider: 1500,
+    priceDelivery: 0,
+    durationDays: 30,
+    description: 'Para negócios estabelecidos. Pedidos ilimitados, destaque prioritário e menor taxa.',
+    isActive: true,
+    isTrial: false,
+    transactionFeePercent: 1.8,
+    ordersIncluded: 999999, // Ilimitado
+    orderExcessFee: 0,
+    productsLimit: 999999, // Ilimitado
+    hasHighlight: true,
+    hasPriority: true,
+  },
+  
+  // =====================
+  // PLANOS PARA ENTREGADORES
+  // =====================
+  {
+    name: 'Básico',
+    type: 'BASIC',
+    targetUserType: 'DELIVERY_PERSON',
+    priceProvider: 0,
+    priceDelivery: 100,
+    durationDays: 30,
+    description: 'Para entregadores part-time ou a começar. Até 40 entregas/mês.',
+    isActive: true,
+    isTrial: false,
+    transactionFeePercent: 7,
+    deliveriesIncluded: 40,
+    deliveryExcessFee: 6,
+    hasPriority: false,
+    hasInsurance: false,
+  },
+  {
+    name: 'Ativo',
+    type: 'ACTIVE',
+    targetUserType: 'DELIVERY_PERSON',
+    priceProvider: 0,
+    priceDelivery: 250,
+    durationDays: 30,
+    description: 'O plano principal, para quem faz delivery como atividade principal. Até 180 entregas/mês.',
+    isActive: true,
+    isTrial: false,
+    transactionFeePercent: 4.5,
+    deliveriesIncluded: 180,
+    deliveryExcessFee: 4,
+    hasPriority: true,
+    hasInsurance: true,
+  },
+  {
+    name: 'Top',
+    type: 'TOP',
+    targetUserType: 'DELIVERY_PERSON',
+    priceProvider: 0,
     priceDelivery: 500,
     durationDays: 30,
-    description: 'Licença válida por 1 mês',
+    description: 'Para entregadores de alto volume. Entregas ilimitadas, máxima visibilidade e menor taxa.',
+    isActive: true,
+    isTrial: false,
+    transactionFeePercent: 2.5,
+    deliveriesIncluded: 999999, // Ilimitado
+    deliveryExcessFee: 0,
+    hasPriority: true,
+    hasInsurance: true,
+    hasVerifiedBadge: true,
   },
+  
+  // =====================
+  // PLANOS ANUAIS (com desconto de 20%)
+  // =====================
   {
-    name: 'Licença Semestral',
-    type: 'SEMESTRAL',
-    priceProvider: 7500,
-    priceDelivery: 2500,
-    durationDays: 180,
-    description: 'Licença válida por 6 meses - 17% de desconto',
-  },
-  {
-    name: 'Licença Anual',
-    type: 'ANNUAL',
-    priceProvider: 12000,
-    priceDelivery: 4000,
+    name: 'Starter Anual',
+    type: 'STARTER',
+    targetUserType: 'PROVIDER',
+    priceProvider: 2880, // 300 * 12 * 0.8
+    priceDelivery: 0,
     durationDays: 365,
-    description: 'Licença válida por 1 ano - 33% de desconto',
+    description: 'Plano Starter anual com 20% de desconto. Economize 720 MZN/ano.',
+    isActive: true,
+    isTrial: false,
+    transactionFeePercent: 4.5,
+    ordersIncluded: 60,
+    orderExcessFee: 10,
+    productsLimit: 30,
+    hasHighlight: false,
+  },
+  {
+    name: 'Grow Anual',
+    type: 'GROW',
+    targetUserType: 'PROVIDER',
+    priceProvider: 7200, // 750 * 12 * 0.8
+    priceDelivery: 0,
+    durationDays: 365,
+    description: 'Plano Grow anual com 20% de desconto. Economize 1800 MZN/ano.',
+    isActive: true,
+    isTrial: false,
+    transactionFeePercent: 3,
+    ordersIncluded: 200,
+    orderExcessFee: 7,
+    productsLimit: 150,
+    hasHighlight: true,
+  },
+  {
+    name: 'Pro Anual',
+    type: 'PRO',
+    targetUserType: 'PROVIDER',
+    priceProvider: 14400, // 1500 * 12 * 0.8
+    priceDelivery: 0,
+    durationDays: 365,
+    description: 'Plano Pro anual com 20% de desconto. Economize 3600 MZN/ano.',
+    isActive: true,
+    isTrial: false,
+    transactionFeePercent: 1.8,
+    ordersIncluded: 999999,
+    orderExcessFee: 0,
+    productsLimit: 999999,
+    hasHighlight: true,
+    hasPriority: true,
+  },
+  {
+    name: 'Básico Anual',
+    type: 'BASIC',
+    targetUserType: 'DELIVERY_PERSON',
+    priceProvider: 0,
+    priceDelivery: 960, // 100 * 12 * 0.8
+    durationDays: 365,
+    description: 'Plano Básico anual com 20% de desconto. Economize 240 MZN/ano.',
+    isActive: true,
+    isTrial: false,
+    transactionFeePercent: 7,
+    deliveriesIncluded: 40,
+    deliveryExcessFee: 6,
+    hasPriority: false,
+    hasInsurance: false,
+  },
+  {
+    name: 'Ativo Anual',
+    type: 'ACTIVE',
+    targetUserType: 'DELIVERY_PERSON',
+    priceProvider: 0,
+    priceDelivery: 2400, // 250 * 12 * 0.8
+    durationDays: 365,
+    description: 'Plano Ativo anual com 20% de desconto. Economize 600 MZN/ano.',
+    isActive: true,
+    isTrial: false,
+    transactionFeePercent: 4.5,
+    deliveriesIncluded: 180,
+    deliveryExcessFee: 4,
+    hasPriority: true,
+    hasInsurance: true,
+  },
+  {
+    name: 'Top Anual',
+    type: 'TOP',
+    targetUserType: 'DELIVERY_PERSON',
+    priceProvider: 0,
+    priceDelivery: 4800, // 500 * 12 * 0.8
+    durationDays: 365,
+    description: 'Plano Top anual com 20% de desconto. Economize 1200 MZN/ano.',
+    isActive: true,
+    isTrial: false,
+    transactionFeePercent: 2.5,
+    deliveriesIncluded: 999999,
+    deliveryExcessFee: 0,
+    hasPriority: true,
+    hasInsurance: true,
+    hasVerifiedBadge: true,
   },
 ];
 
@@ -166,11 +370,16 @@ async function main() {
     },
   });
 
+  // Obter licenças para atribuir
+  const growLicense = await prisma.license.findFirst({
+    where: { type: 'GROW', durationDays: 30 },
+  });
+  const activeLicense = await prisma.license.findFirst({
+    where: { type: 'ACTIVE', durationDays: 30 },
+  });
+
   // Criar prestadores de exemplo com licença
   console.log('🏪 Criando prestadores de exemplo...');
-  const annualLicense = await prisma.license.findFirst({
-    where: { type: 'ANNUAL' },
-  });
   
   const providers = [
     {
@@ -225,7 +434,7 @@ async function main() {
     });
     
     const licenseExpiresAt = new Date();
-    licenseExpiresAt.setFullYear(licenseExpiresAt.getFullYear() + 1);
+    licenseExpiresAt.setMonth(licenseExpiresAt.getMonth() + 1);
     
     await prisma.provider.create({
       data: {
@@ -236,7 +445,7 @@ async function main() {
         latitude: p.latitude,
         longitude: p.longitude,
         isOpen: true,
-        licenseId: annualLicense?.id,
+        licenseId: growLicense?.id,
         licenseExpiresAt: licenseExpiresAt,
         cityId: maputoCity?.id,
       },
@@ -286,7 +495,7 @@ async function main() {
     }
   }
 
-  // Criar entregadores de exemplo com licença e QR Code
+  // Criar entregadores de exemplo com licença
   console.log('🏍️ Criando entregadores de exemplo...');
   const deliveryLocations = [
     { lat: -25.9100, lng: 32.5200 }, // Zimpeto
@@ -313,7 +522,7 @@ async function main() {
     });
     
     const licenseExpiresAt = new Date();
-    licenseExpiresAt.setFullYear(licenseExpiresAt.getFullYear() + 1);
+    licenseExpiresAt.setMonth(licenseExpiresAt.getMonth() + 1);
     
     // Gerar QR Code único para o entregador
     const qrCode = generateQRCode('DEL');
@@ -331,7 +540,7 @@ async function main() {
         currentLongitude: deliveryLocations[i].lng,
         rating: 4.5 + (i * 0.1),
         totalDeliveries: 10 + (i * 5),
-        licenseId: annualLicense?.id,
+        licenseId: activeLicense?.id,
         licenseExpiresAt: licenseExpiresAt,
         cityId: maputoCity?.id,
       },
@@ -345,10 +554,15 @@ async function main() {
   console.log('📋 Resumo:');
   console.log(`  - ${cities.length} cidades criadas`);
   console.log(`  - 1 administrador (nachingweya@gmail.com / 123456)`);
-  console.log(`  - ${licenses.length} licenças configuradas`);
-  console.log(`  - ${allProviders.length} prestadores de exemplo`);
-  console.log(`  - 3 entregadores de exemplo (com QR Code único)`);
+  console.log(`  - ${licenses.length} planos de licença configurados`);
+  console.log(`  - ${allProviders.length} prestadores de exemplo (plano Grow)`);
+  console.log(`  - 3 entregadores de exemplo (plano Ativo)`);
   console.log(`  - 1 cliente de exemplo (cliente@teste.com / 123456)`);
+  console.log('');
+  console.log('📦 Planos Disponíveis:');
+  console.log('  PRESTADORES: Starter (300 MT), Grow (750 MT), Pro (1500 MT)');
+  console.log('  ENTREGADORES: Básico (100 MT), Ativo (250 MT), Top (500 MT)');
+  console.log('  TRIAL: 10 dias (gratuito ou pago - admin define)');
   console.log('');
   console.log('🔐 Credenciais de Teste:');
   console.log('  Admin: nachingweya@gmail.com / 123456');
