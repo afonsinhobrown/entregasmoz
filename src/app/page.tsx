@@ -111,6 +111,31 @@ const vehicleIcons: Record<VehicleType, string> = {
 // Maputo coordinates
 const MAPUTO_CENTER: [number, number] = [-25.9692, 32.5732]
 
+// Calculate distance between two points (Haversine formula)
+function calculateDistance(lat1: number, lon1: number, lat2: number, lon2: number): number {
+  const R = 6371 // Earth's radius in km
+  const dLat = (lat2 - lat1) * Math.PI / 180
+  const dLon = (lon2 - lon1) * Math.PI / 180
+  const a = 
+    Math.sin(dLat/2) * Math.sin(dLat/2) +
+    Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * 
+    Math.sin(dLon/2) * Math.sin(dLon/2)
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a))
+  return R * c
+}
+
+// Calculate estimated time (assuming 30 km/h average speed in city)
+function calculateTime(distanceKm: number, vehicleType: VehicleType): number {
+  const speeds: Record<VehicleType, number> = {
+    MOTORCYCLE: 35, // km/h
+    BICYCLE: 15,
+    CAR: 25,
+    SCOOTER: 30,
+  }
+  const speed = speeds[vehicleType] || 30
+  return (distanceKm / speed) * 60 // minutes
+}
+
 // Custom marker icons
 const createCustomIcon = (emoji: string, color: string = 'blue') => {
   if (typeof window === 'undefined') return null
@@ -133,20 +158,26 @@ function RealMap({ providers, deliveryPersons, user, onLoginClick }: {
   const [userLocation, setUserLocation] = useState<[number, number] | null>(null)
 
   useEffect(() => {
-    setMounted(true)
     // Try to get user's real location
     if (navigator.geolocation) {
       navigator.geolocation.getCurrentPosition(
         (pos) => {
           setUserLocation([pos.coords.latitude, pos.coords.longitude])
+          setMounted(true)
         },
         () => {
           // Default to Maputo if location not available
-          setUserLocation(MAPUTO_CENTER)
+          setTimeout(() => {
+            setUserLocation(MAPUTO_CENTER)
+            setMounted(true)
+          }, 0)
         }
       )
     } else {
-      setUserLocation(MAPUTO_CENTER)
+      setTimeout(() => {
+        setUserLocation(MAPUTO_CENTER)
+        setMounted(true)
+      }, 0)
     }
   }, [])
 
@@ -188,10 +219,12 @@ function RealMap({ providers, deliveryPersons, user, onLoginClick }: {
 
         {/* Provider Markers */}
         {providers.map((provider) => {
-          const lat = provider.latitude || MAPUTO_CENTER[0] + (Math.random() - 0.5) * 0.02
-          const lng = provider.longitude || MAPUTO_CENTER[1] + (Math.random() - 0.5) * 0.02
+          const lat = provider.latitude || MAPUTO_CENTER[0]
+          const lng = provider.longitude || MAPUTO_CENTER[1]
           const emoji = provider.category === 'Restaurante' ? '🍴' : provider.category === 'Pizzaria' ? '🍕' : '🛒'
           const color = provider.isOpen ? '#22C55E' : '#EF4444'
+          const distance = calculateDistance(userLocation[0], userLocation[1], lat, lng)
+          const timeMinutes = calculateTime(distance, 'MOTORCYCLE')
           
           return (
             <Marker 
@@ -200,7 +233,7 @@ function RealMap({ providers, deliveryPersons, user, onLoginClick }: {
               icon={createCustomIcon(emoji, color)}
             >
               <Popup>
-                <div className="p-1 min-w-48">
+                <div className="p-2 min-w-52">
                   <p className="font-bold text-lg">{provider.storeName}</p>
                   <p className="text-sm text-gray-500">{provider.category}</p>
                   <p className="text-xs mt-1">{provider.address || 'Maputo'}</p>
@@ -210,6 +243,15 @@ function RealMap({ providers, deliveryPersons, user, onLoginClick }: {
                     </Badge>
                     <span className="text-xs">{provider.products.length} produtos</span>
                   </div>
+                  <Separator className="my-2" />
+                  <div className="flex justify-between text-sm">
+                    <span className="text-gray-500">📍 Distância:</span>
+                    <span className="font-bold text-orange-600">{distance.toFixed(1)} km</span>
+                  </div>
+                  <div className="flex justify-between text-sm">
+                    <span className="text-gray-500">⏱️ Tempo estimado:</span>
+                    <span className="font-bold text-green-600">{Math.round(timeMinutes)} min</span>
+                  </div>
                 </div>
               </Popup>
             </Marker>
@@ -218,8 +260,10 @@ function RealMap({ providers, deliveryPersons, user, onLoginClick }: {
 
         {/* Delivery Person Markers */}
         {deliveryPersons.map((dp) => {
-          const lat = dp.currentLatitude || MAPUTO_CENTER[0] + (Math.random() - 0.5) * 0.03
-          const lng = dp.currentLongitude || MAPUTO_CENTER[1] + (Math.random() - 0.5) * 0.03
+          const lat = dp.currentLatitude || MAPUTO_CENTER[0]
+          const lng = dp.currentLongitude || MAPUTO_CENTER[1]
+          const distance = calculateDistance(userLocation[0], userLocation[1], lat, lng)
+          const timeMinutes = calculateTime(distance, dp.vehicleType)
           
           return (
             <Marker 
@@ -228,7 +272,7 @@ function RealMap({ providers, deliveryPersons, user, onLoginClick }: {
               icon={createCustomIcon(vehicleIcons[dp.vehicleType], '#10B981')}
             >
               <Popup>
-                <div className="p-1 min-w-48">
+                <div className="p-2 min-w-52">
                   {user ? (
                     <>
                       <p className="font-bold text-lg">{dp.user?.name || 'Entregador'}</p>
@@ -240,17 +284,39 @@ function RealMap({ providers, deliveryPersons, user, onLoginClick }: {
                       <Badge className={dp.isAvailable ? 'bg-green-500 mt-2' : 'bg-gray-500 mt-2'}>
                         {dp.isAvailable ? 'Disponível' : 'Ocupado'}
                       </Badge>
+                      <Separator className="my-2" />
+                      <div className="flex justify-between text-sm">
+                        <span className="text-gray-500">📍 Distância:</span>
+                        <span className="font-bold text-orange-600">{distance.toFixed(1)} km</span>
+                      </div>
+                      <div className="flex justify-between text-sm">
+                        <span className="text-gray-500">⏱️ Chega em:</span>
+                        <span className="font-bold text-green-600">{Math.round(timeMinutes)} min</span>
+                      </div>
+                      <div className="flex justify-between text-sm">
+                        <span className="text-gray-500">🏍️ Veículo:</span>
+                        <span className="font-medium">{vehicleIcons[dp.vehicleType]} {dp.vehicleType.toLowerCase()}</span>
+                      </div>
                     </>
                   ) : (
                     <>
                       <p className="font-bold text-gray-400">🔒 Entregador</p>
                       <p className="text-sm text-gray-500">Faça login para ver detalhes</p>
+                      <Separator className="my-2" />
+                      <div className="flex justify-between text-sm">
+                        <span className="text-gray-500">📍 Distância:</span>
+                        <span className="font-bold text-orange-600">{distance.toFixed(1)} km</span>
+                      </div>
+                      <div className="flex justify-between text-sm">
+                        <span className="text-gray-500">⏱️ Chega em:</span>
+                        <span className="font-bold text-green-600">~{Math.round(timeMinutes)} min</span>
+                      </div>
                       <Button 
                         size="sm" 
-                        className="mt-2 bg-orange-500 text-white"
+                        className="mt-2 w-full bg-orange-500 text-white"
                         onClick={onLoginClick}
                       >
-                        Entrar
+                        🔐 Entrar para Ver Detalhes
                       </Button>
                     </>
                   )}
