@@ -14,6 +14,7 @@ import { Separator } from '@/components/ui/separator'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog'
 import { HoverCard, HoverCardContent, HoverCardTrigger } from '@/components/ui/hover-card'
 import { Switch } from '@/components/ui/switch'
+import LandingPage from '@/components/views/LandingPage'
 
 // Dynamically import Map component (no SSR)
 const MapContainer = dynamic(() => import('react-leaflet').then(mod => mod.MapContainer), { ssr: false })
@@ -2563,7 +2564,7 @@ export default function Home() {
   
   const [selectedCategory, setSelectedCategory] = useState('all')
   const [searchQuery, setSearchQuery] = useState('')
-  const [view, setView] = useState<'landing' | 'cart' | 'checkout' | 'orders'>('landing')
+  const [view, setView] = useState<'landing' | 'cart' | 'checkout' | 'orders' | 'delivery-request'>('landing')
   const [mainTab, setMainTab] = useState<'services' | 'delivery'>('services')
   const [selectedDeliveryPerson, setSelectedDeliveryPerson] = useState<DeliveryPerson | null>(null)
   const [deliveryAddress, setDeliveryAddress] = useState('')
@@ -3237,214 +3238,35 @@ export default function Home() {
         )}
 
         {/* CLIENT / LANDING VIEW */}
-        {user?.userType !== 'DELIVERY_PERSON' && user?.userType !== 'PROVIDER' && user?.userType !== 'ADMIN' && (
-          <>
-            {/* Main Tabs */}
-            <div className="flex gap-2 mb-4">
-              <Button 
-                className={`flex-1 py-2 text-base font-medium ${mainTab === 'services' ? 'bg-gradient-to-r from-orange-500 to-red-500 text-white shadow-lg' : 'bg-white text-gray-700 hover:bg-gray-100'}`}
-                onClick={() => setMainTab('services')}
-              >
-                🏪 Serviços
-              </Button>
-              <Button 
-                className={`flex-1 py-2 text-base font-medium ${mainTab === 'delivery' ? 'bg-gradient-to-r from-green-500 to-emerald-600 text-white shadow-lg' : 'bg-white text-gray-700 hover:bg-gray-100'}`}
-                onClick={() => setMainTab('delivery')}
-              >
-                🏍️ Entregadores Perto
-              </Button>
-            </div>
+        {view === 'landing' && user?.userType !== 'DELIVERY_PERSON' && user?.userType !== 'PROVIDER' && user?.userType !== 'ADMIN' && (
+          <LandingPage
+            user={user}
+            providers={providers}
+            products={allProducts}
+            deliveryPersons={deliveryPersons}
+            onLoginClick={() => setShowAuthModal(true)}
+            onAddToCart={(product) => addToCart(product)}
+            onDeliveryRequest={() => user ? setView('delivery-request') : setShowAuthModal(true)}
+          />
+        )}
 
-            {/* Search */}
-            <Input 
-              className="bg-white shadow-md mb-4"
-              placeholder="🔍 Buscar..."
-              value={searchQuery}
-              onChange={e => setSearchQuery(e.target.value)}
-            />
-
-            {/* Categories */}
-            <div className="bg-white rounded-lg shadow p-2 mb-4 overflow-x-auto">
-              <div className="flex gap-1">
-                {categories.map(cat => (
-                  <Button 
-                    key={cat.id}
-                    size="sm"
-                    variant={selectedCategory === cat.id ? 'default' : 'ghost'}
-                    className={`rounded-full ${selectedCategory === cat.id ? 'bg-orange-500 text-white' : ''}`}
-                    onClick={() => setSelectedCategory(cat.id)}
-                  >
-                    {cat.icon} {cat.name}
-                  </Button>
-                ))}
-              </div>
-            </div>
-
-            {/* Map - Only show on Delivery tab */}
-            {mainTab === 'delivery' && mapLoaded && userLocation && (
-              <div className="mb-4">
-                <RealMap 
-                  userLocation={userLocation}
-                  providers={getFilteredProviders()}
-                  deliveryPersons={deliveryPersons}
-                  user={user}
-                  onLoginClick={() => setShowAuthModal(true)}
-                  onProviderSelect={(p) => {
-                    setSelectedProvider(p)
-                    setSearchQuery(p.storeName)
-                  }}
+        {/* DELIVERY REQUEST VIEW */}
+        {view === 'delivery-request' && user && user.userType === 'CLIENT' && (
+          <div className="py-6">
+            {/* Use dynamic import for delivery request panel */}
+            {(() => {
+              const DeliveryRequestPanel = dynamic(
+                () => import('@/components/delivery/DeliveryRequestPanel'),
+                { ssr: false, loading: () => <div className="p-8 text-center">Carregando...</div> }
+              )
+              return (
+                <DeliveryRequestPanel
+                  user={{ id: user.id, name: user.name, phone: user.phone || undefined }}
+                  onClose={() => setView('landing')}
                 />
-              </div>
-            )}
-
-            {/* Nearby Delivery Persons List */}
-            {mainTab === 'delivery' && (
-              <div className="mb-4">
-                <h3 className="font-bold text-lg mb-2 flex items-center gap-2">
-                  🏍️ Entregadores Próximos
-                  <Badge className="bg-green-500">{getSortedDeliveryPersons().length}</Badge>
-                </h3>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
-                  {getSortedDeliveryPersons().slice(0, 6).map((dp) => {
-                    const timeMinutes = calculateTime(dp.distance || 0, dp.vehicleType)
-                    return (
-                      <Card key={dp.id} className="hover:shadow-md transition-shadow">
-                        <CardContent className="p-3 flex items-center gap-3">
-                          <div className="w-12 h-12 bg-gradient-to-br from-green-400 to-emerald-600 rounded-full flex items-center justify-center text-2xl">
-                            {vehicleIcons[dp.vehicleType]}
-                          </div>
-                          <div className="flex-1">
-                            {user ? (
-                              <p className="font-medium">{dp.user?.name || 'Entregador'}</p>
-                            ) : (
-                              <p className="font-medium text-gray-400">🔒 Entregador</p>
-                            )}
-                            <div className="flex items-center gap-2 text-xs text-gray-500">
-                              <span>📍 {(dp.distance || 0).toFixed(1)} km</span>
-                              <span>⏱️ {Math.round(timeMinutes)} min</span>
-                              <span>⭐ {dp.rating.toFixed(1)}</span>
-                            </div>
-                          </div>
-                          <Badge className={dp.isAvailable ? 'bg-green-500' : 'bg-gray-400'}>
-                            {dp.isAvailable ? 'Disponível' : 'Ocupado'}
-                          </Badge>
-                        </CardContent>
-                      </Card>
-                    )
-                  })}
-                </div>
-              </div>
-            )}
-
-            {/* Services/Products */}
-            {mainTab === 'services' && (
-              <>
-                {/* Available Delivery Persons (without map) */}
-                <h3 className="font-bold text-lg mb-2 flex items-center gap-2">
-                  🏍️ Entregadores Disponíveis
-                  <Badge className="bg-green-500">{deliveryPersons.filter(d => d.isAvailable).length}</Badge>
-                </h3>
-                <div className="flex gap-2 overflow-x-auto pb-2 mb-4">
-                  {deliveryPersons.filter(d => d.isAvailable).slice(0, 5).map(dp => (
-                    <Card key={dp.id} className="min-w-[140px] shrink-0 hover:shadow-md">
-                      <CardContent className="p-3 text-center">
-                        <div className="text-2xl mb-1">{vehicleIcons[dp.vehicleType]}</div>
-                        {user ? (
-                          <p className="text-sm font-medium">{dp.user?.name}</p>
-                        ) : (
-                          <p className="text-sm text-gray-400">🔒 Entregador</p>
-                        )}
-                        <p className="text-xs text-gray-500">⭐ {dp.rating.toFixed(1)}</p>
-                        {dp.currentLatitude && userLocation && (
-                          <p className="text-xs text-orange-600">
-                            📍 {calculateDistance(userLocation[0], userLocation[1], dp.currentLatitude, dp.currentLongitude!).toFixed(1)} km
-                          </p>
-                        )}
-                      </CardContent>
-                    </Card>
-                  ))}
-                </div>
-
-                {/* Providers */}
-                <h3 className="font-bold text-lg mb-2 flex items-center gap-2">
-                  🏪 Fornecedores
-                </h3>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-2 mb-4">
-                  {getFilteredProviders().map(provider => {
-                    const distance = userLocation && provider.latitude && provider.longitude
-                      ? calculateDistance(userLocation[0], userLocation[1], provider.latitude, provider.longitude)
-                      : null
-                    const deliveryFee = distance ? calculateDeliveryFee(distance) : null
-                    
-                    return (
-                      <Card 
-                        key={provider.id} 
-                        className={`cursor-pointer transition-all hover:shadow-md ${selectedProvider?.id === provider.id ? 'ring-2 ring-orange-500' : ''}`}
-                        onClick={() => setSelectedProvider(selectedProvider?.id === provider.id ? null : provider)}
-                      >
-                        <CardContent className="p-3">
-                          <div className="flex items-center gap-3">
-                            <div className="w-12 h-12 bg-gradient-to-br from-orange-200 to-red-200 rounded-lg flex items-center justify-center text-2xl">
-                              {provider.category === 'Restaurante' ? '🍴' : provider.category === 'Pizzaria' ? '🍕' : '🛒'}
-                            </div>
-                            <div className="flex-1 min-w-0">
-                              <div className="flex items-center gap-2">
-                                <p className="font-medium truncate">{provider.storeName}</p>
-                                <Badge className={provider.isOpen ? 'bg-green-500' : 'bg-red-500'} variant="secondary">
-                                  {provider.isOpen ? 'Aberto' : 'Fechado'}
-                                </Badge>
-                              </div>
-                              <p className="text-xs text-gray-500">{provider.category} • {provider.products.length} produtos</p>
-                              {distance && (
-                                <p className="text-xs text-orange-600 font-medium">
-                                  📍 {distance.toFixed(1)} km • 🚚 {deliveryFee} MT
-                                </p>
-                              )}
-                            </div>
-                          </div>
-                        </CardContent>
-                      </Card>
-                    )
-                  })}
-                </div>
-
-                {/* Products */}
-                <h3 className="font-bold text-lg mb-2 flex items-center gap-2">
-                  🍽️ Produtos
-                  {selectedProvider && (
-                    <Button size="sm" variant="ghost" onClick={() => setSelectedProvider(null)}>
-                      ✕ Limpar filtro
-                    </Button>
-                  )}
-                </h3>
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
-                  {getFilteredProducts().map(product => (
-                    <Card key={product.id} className="hover:shadow-md transition-shadow">
-                      <CardContent className="p-3">
-                        <div className="flex gap-3">
-                          <div className="w-16 h-16 bg-gray-100 rounded-lg flex items-center justify-center text-2xl shrink-0">
-                            {product.name.toLowerCase().includes('pizza') ? '🍕' : 
-                             product.name.toLowerCase().includes('coca') ? '🥤' : 
-                             product.name.toLowerCase().includes('hamb') ? '🍔' : '🍽️'}
-                          </div>
-                          <div className="flex-1 min-w-0">
-                            <p className="font-medium text-sm truncate">{product.name}</p>
-                            <p className="text-xs text-gray-500 truncate">{product.provider?.storeName}</p>
-                            <div className="flex items-center justify-between mt-1">
-                              <Badge className="bg-green-500">{product.price.toLocaleString('pt-MZ')} MT</Badge>
-                              <Button size="sm" onClick={() => addToCart(product)}>
-                                +
-                              </Button>
-                            </div>
-                          </div>
-                        </div>
-                      </CardContent>
-                    </Card>
-                  ))}
-                </div>
-              </>
-            )}
-          </>
+              )
+            })()}
+          </div>
         )}
 
         {/* CART VIEW */}
