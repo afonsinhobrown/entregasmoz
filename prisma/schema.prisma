@@ -1,0 +1,547 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+enum UserType {
+  CLIENT
+  DELIVERY_PERSON
+  PROVIDER
+  ADMIN
+}
+
+enum OrderStatus {
+  PENDING
+  CONFIRMED
+  PREPARING
+  READY
+  PICKED_UP
+  IN_TRANSIT
+  DELIVERED
+  CANCELLED
+}
+
+enum VehicleType {
+  MOTORCYCLE
+  BICYCLE
+  CAR
+  SCOOTER
+}
+
+enum LicenseType {
+  TRIAL     // 10 dias, renovável, pode ser free ou pago
+  STARTER   // Plano básico para prestadores
+  GROW      // Plano médio para prestadores
+  PRO       // Plano premium para prestadores
+  BASIC     // Plano básico para entregadores
+  ACTIVE    // Plano médio para entregadores
+  TOP       // Plano premium para entregadores
+  MONTHLY   // Legado
+  SEMESTRAL // Legado
+  ANNUAL    // Legado
+}
+
+enum PaymentStatus {
+  PENDING
+  PROCESSING
+  COMPLETED
+  FAILED
+  CANCELLED
+}
+
+enum PaymentMethod {
+  MPESA
+  EMOLA
+  VISA
+  CASH
+  MANUAL
+}
+
+enum TransactionType {
+  LICENSE_PAYMENT
+  DELIVERY_FEE
+  PLATFORM_COMMISSION
+  PAYOUT_PROVIDER
+  PAYOUT_DELIVERY
+  REFUND
+  CASH_COLLECTION
+}
+
+enum ConfirmationType {
+  PICKUP       // Entregador confirma retirada com prestador
+  DELIVERY     // Cliente confirma recebimento
+  CASH_PAYMENT // Entregador confirma pagamento cash
+}
+
+// ============ USUÁRIOS ============
+
+model User {
+  id           String     @id @default(cuid())
+  name         String
+  email        String     @unique
+  password     String
+  phone        String?
+  profileImage String?    // Foto de perfil (base64 ou URL)
+  userType     UserType
+  isActive     Boolean    @default(true)
+  isBlocked    Boolean    @default(false)
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
+
+  client         Client?
+  deliveryPerson DeliveryPerson?
+  provider       Provider?
+  admin          Admin?
+
+  ratingsGiven    Rating[]  @relation("RatingGiver")
+  ratingsReceived Rating[]  @relation("RatingReceiver")
+  payments        Payment[]
+  transactions    Transaction[]
+  confirmations   OrderConfirmation[] @relation("UserConfirmations")
+  locations       LocationHistory[]
+}
+
+model Admin {
+  id        String   @id @default(cuid())
+  userId    String   @unique
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  canManageUsers      Boolean @default(true)
+  canManagePayments   Boolean @default(true)
+  canManageLicenses   Boolean @default(true)
+  canManageCities     Boolean @default(true)
+  canManageSettings   Boolean @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model Client {
+  id           String   @id @default(cuid())
+  userId       String   @unique
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  address      String?
+  latitude     Float?
+  longitude    Float?
+  cityId       String?
+  city         City?    @relation(fields: [cityId], references: [id])
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  orders Order[] @relation("ClientOrders")
+}
+
+model DeliveryPerson {
+  id               String      @id @default(cuid())
+  userId           String      @unique
+  user             User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  // Veículo - matrícula obrigatória
+  vehicleType      VehicleType
+  plateNumber      String      // Matrícula obrigatória
+  vehicleColor     String?     // Cor do veículo
+  vehicleBrand     String?     // Marca/modelo
+  
+  // QR Code único do entregador
+  qrCode           String      @unique  // Código QR único para identificação
+  
+  isAvailable      Boolean     @default(false)
+  currentLatitude  Float?
+  currentLongitude Float?
+  rating           Float       @default(5.0)
+  totalDeliveries  Int         @default(0)
+  
+  // Licença e Premium
+  licenseId        String?
+  license          License?    @relation(fields: [licenseId], references: [id])
+  licenseExpiresAt DateTime?
+  isPremium        Boolean     @default(false)
+  premiumExpiresAt DateTime?
+  
+  // Cash em mãos (para pagamentos cash que precisa transferir)
+  cashOnHand       Float       @default(0)
+  
+  // Localização
+  cityId           String?
+  city             City?       @relation(fields: [cityId], references: [id])
+  
+  createdAt        DateTime    @default(now())
+  updatedAt        DateTime    @updatedAt
+
+  deliveries    Order[] @relation("DeliveryPersonOrders")
+  payments      Payment[] @relation("DeliveryPersonPayments")
+  locations     LocationHistory[] @relation("DeliveryPersonLocations")
+}
+
+model Provider {
+  id               String   @id @default(cuid())
+  userId           String   @unique
+  user             User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  storeName        String
+  storeDescription String?
+  storeImage       String?  // Logo/foto da loja
+  category         String?
+  address          String?
+  latitude         Float?
+  longitude        Float?
+  isOpen           Boolean  @default(true)
+  
+  // Licença e Premium
+  licenseId        String?
+  license          License? @relation(fields: [licenseId], references: [id])
+  licenseExpiresAt DateTime?
+  isPremium        Boolean  @default(false)
+  premiumExpiresAt DateTime?
+  
+  // Localização
+  cityId           String?
+  city             City?    @relation(fields: [cityId], references: [id])
+  
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  products Product[] @relation("ProviderProducts")
+  orders   Order[]   @relation("ProviderOrders")
+  payments Payment[] @relation("ProviderPayments")
+}
+
+model Product {
+  id          String   @id @default(cuid())
+  providerId  String
+  provider    Provider @relation("ProviderProducts", fields: [providerId], references: [id], onDelete: Cascade)
+  name        String
+  description String?
+  price       Float
+  image       String?
+  isAvailable Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  orderItems OrderItem[]
+}
+
+// ============ CIDADES ============
+
+model City {
+  id        String   @id @default(cuid())
+  name      String   @unique
+  province  String
+  latitude  Float
+  longitude Float
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  clients            Client[]
+  deliveryPersons    DeliveryPerson[]
+  providers          Provider[]
+  deliveryFeeConfigs DeliveryFeeConfig[]
+}
+
+// ============ LICENÇAS ============
+
+model License {
+  id              String       @id @default(cuid())
+  name            String
+  type            LicenseType
+  
+  // Preços
+  priceProvider   Float        @default(0)  // Preço para prestador
+  priceDelivery   Float        @default(0)  // Preço para entregador
+  durationDays    Int          // Duração em dias
+  description     String?
+  isActive        Boolean      @default(true)
+  
+  // Target user type
+  targetUserType  String?       @default("BOTH") // PROVIDER, DELIVERY_PERSON, BOTH
+  
+  // Trial settings
+  isTrial         Boolean      @default(false)
+  isFree          Boolean      @default(false)  // Admin decide se é gratuito ou pago
+  
+  // Transaction fees
+  transactionFeePercent Float @default(5)  // % taxa por transação
+  
+  // Limits for providers
+  ordersIncluded      Int?         // Pedidos incluídos por mês
+  orderExcessFee      Float?       @default(10) // Taxa por pedido excedente
+  productsLimit       Int?         // Limite de produtos no catálogo
+  
+  // Limits for delivery persons
+  deliveriesIncluded  Int?         // Entregas incluídas por mês
+  deliveryExcessFee   Float?       @default(6) // Taxa por entrega excedente
+  
+  // Features
+  hasHighlight        Boolean      @default(false) // Destaque na plataforma
+  hasPriority         Boolean      @default(false) // Prioridade em pedidos
+  hasInsurance        Boolean      @default(false) // Seguro por entrega
+  hasVerifiedBadge    Boolean      @default(false) // Badge verificado
+  
+  createdAt       DateTime     @default(now())
+  updatedAt       DateTime     @updatedAt
+
+  providers       Provider[]
+  deliveryPersons DeliveryPerson[]
+}
+
+// ============ PAGAMENTOS ============
+
+model Payment {
+  id               String        @id @default(cuid())
+  userId           String
+  user             User          @relation(fields: [userId], references: [id])
+  
+  // Para licenças de prestador ou entregador
+  providerId       String?
+  provider         Provider?     @relation("ProviderPayments", fields: [providerId], references: [id])
+  deliveryPersonId String?
+  deliveryPerson   DeliveryPerson? @relation("DeliveryPersonPayments", fields: [deliveryPersonId], references: [id])
+  
+  // Para pagamentos de pedidos
+  orderId          String?
+  
+  // Detalhes do pagamento
+  amount           Float
+  method           PaymentMethod
+  status           PaymentStatus @default(PENDING)
+  
+  // Para pagamentos manuais (comprovativo)
+  receiptImage     String?       // Base64 ou URL do comprovativo
+  receiptNumber    String?       // Número do recibo/transação
+  confirmedBy      String?       // ID do admin que confirmou
+  confirmedAt      DateTime?
+  
+  // Referência externa (M-Pesa, e-Mola, Visa)
+  externalRef      String?
+  
+  // Tipo de pagamento
+  licenseId        String?
+  isPremium        Boolean       @default(false)
+  
+  // Para pagamentos cash
+  isCashTransferred Boolean      @default(false)  // Se o cash foi transferido para plataforma
+  cashTransferRef   String?      // Referência da transferência cash
+  
+  createdAt        DateTime      @default(now())
+  updatedAt        DateTime      @updatedAt
+
+  transactions     Transaction[]
+}
+
+// ============ PEDIDOS ============
+
+model Order {
+  id               String       @id @default(cuid())
+  clientId         String
+  client           Client       @relation("ClientOrders", fields: [clientId], references: [id], onDelete: Cascade)
+  providerId       String
+  provider         Provider     @relation("ProviderOrders", fields: [providerId], references: [id], onDelete: Cascade)
+  deliveryPersonId String?
+  deliveryPerson   DeliveryPerson? @relation("DeliveryPersonOrders", fields: [deliveryPersonId], references: [id], onDelete: SetNull)
+  
+  status           OrderStatus  @default(PENDING)
+  
+  // QR Code do pedido
+  qrCode           String       @unique  // Código QR para confirmações
+  qrCodeExpiresAt  DateTime?             // Expiração do QR Code
+  
+  // Valores
+  totalAmount      Float
+  deliveryFee      Float        @default(0)
+  platformFee      Float        @default(0)  // Taxa da plataforma
+  providerAmount   Float        @default(0)  // Valor para o prestador
+  deliveryAmount   Float        @default(0)  // Valor para o entregador
+  
+  // Endereços e coordenadas
+  pickupAddress    String?
+  pickupLatitude   Float?
+  pickupLongitude  Float?
+  deliveryAddress  String?
+  deliveryLatitude Float?
+  deliveryLongitude Float?
+  notes            String?
+  
+  // Forma de pagamento
+  paymentMethod    PaymentMethod @default(MPESA)
+  isPaidByClient   Boolean      @default(false)
+  clientConfirmedAt DateTime?
+  
+  // Confirmação de retirada pelo entregador (via QR)
+  pickupConfirmedAt   DateTime?
+  pickupConfirmedBy   String?    // ID do entregador que confirmou
+  
+  // Confirmação de entrega pelo cliente (via QR)
+  deliveryConfirmedAt DateTime?
+  
+  // Para pagamentos cash
+  isCashPayment      Boolean     @default(false)
+  cashCollectedAt    DateTime?   // Quando o cash foi coletado
+  cashTransferProof  String?     // Comprovativo de transferência do cash
+  
+  // Pagamento processado pelo agente
+  isProcessed      Boolean      @default(false)
+  processedBy      String?
+  processedAt      DateTime?
+  
+  createdAt        DateTime     @default(now())
+  updatedAt        DateTime     @updatedAt
+
+  items         OrderItem[]
+  transactions  Transaction[]
+  ratings       Rating[]
+  confirmations OrderConfirmation[]
+  tracking      OrderTracking[]  // Histórico de posições
+}
+
+model OrderItem {
+  id        String  @id @default(cuid())
+  orderId   String
+  order     Order   @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  productId String
+  product   Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+  quantity  Int
+  price     Float
+}
+
+// ============ CONFIRMAÇÕES VIA QR CODE ============
+
+model OrderConfirmation {
+  id              String          @id @default(cuid())
+  orderId         String
+  order           Order           @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  
+  // Tipo de confirmação
+  type            ConfirmationType
+  
+  // Quem confirmou
+  confirmedBy     String
+  confirmer       User            @relation("UserConfirmations", fields: [confirmedBy], references: [id])
+  
+  // Dados da confirmação
+  confirmedAt     DateTime        @default(now())
+  latitude        Float?          // Localização onde confirmou
+  longitude       Float?
+  
+  // Para pagamentos cash
+  amount          Float?          // Valor pago (se cash)
+  receiptImage    String?         // Foto do comprovativo (se transferência)
+  
+  notes           String?
+  
+  createdAt       DateTime        @default(now())
+}
+
+// ============ RASTREAMENTO DE TRAJETO ============
+
+model OrderTracking {
+  id          String   @id @default(cuid())
+  orderId     String
+  order       Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  
+  latitude    Float
+  longitude   Float
+  timestamp   DateTime @default(now())
+  
+  // Velocidade e direção (opcional)
+  speed       Float?   // km/h
+  heading     Float?   // graus
+  
+  createdAt   DateTime @default(now())
+}
+
+// ============ HISTÓRICO DE LOCALIZAÇÃO ============
+
+model LocationHistory {
+  id               String   @id @default(cuid())
+  userId           String
+  user             User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  // Para entregadores
+  deliveryPersonId String?
+  deliveryPerson   DeliveryPerson? @relation("DeliveryPersonLocations", fields: [deliveryPersonId], references: [id], onDelete: Cascade)
+  
+  latitude         Float
+  longitude        Float
+  timestamp        DateTime @default(now())
+  
+  createdAt        DateTime @default(now())
+}
+
+// ============ TRANSAÇÕES FINANCEIRAS ============
+
+model Transaction {
+  id          String          @id @default(cuid())
+  userId      String
+  user        User            @relation(fields: [userId], references: [id])
+  orderId     String?
+  order       Order?          @relation(fields: [orderId], references: [id])
+  paymentId   String?
+  payment     Payment?        @relation(fields: [paymentId], references: [id])
+  
+  type        TransactionType
+  amount      Float
+  description String?
+  
+  createdAt   DateTime        @default(now())
+}
+
+// ============ AVALIAÇÕES ============
+
+model Rating {
+  id          String   @id @default(cuid())
+  orderId     String
+  order       Order    @relation(fields: [orderId], references: [id])
+  
+  // Quem avaliou
+  giverId     String
+  giver       User     @relation("RatingGiver", fields: [giverId], references: [id])
+  
+  // Quem recebeu a avaliação
+  receiverId  String
+  receiver    User     @relation("RatingReceiver", fields: [receiverId], references: [id])
+  
+  // Avaliação
+  rating      Int      // 1-5 estrelas
+  comment     String?
+  
+  // Tipo: avaliou o entregador ou o prestador
+  targetType  String   // 'DELIVERY' ou 'PROVIDER'
+  
+  createdAt   DateTime @default(now())
+  
+  @@unique([orderId, giverId, targetType])
+}
+
+// ============ CONFIGURAÇÕES ============
+
+model Setting {
+  id                    String   @id @default(cuid())
+  key                   String   @unique
+  value                 String
+  description           String?
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+}
+
+// Configurações de taxa de entrega
+model DeliveryFeeConfig {
+  id                    String   @id @default(cuid())
+  cityId                String?  // Null = configuração global
+  city                  City?    @relation(fields: [cityId], references: [id])
+  
+  baseFee               Float    @default(50)     // Taxa base em MT
+  perKmFee              Float    @default(20)     // Taxa por km em MT
+  minFee                Float    @default(50)     // Taxa mínima
+  maxDistance           Float    @default(20)     // Distância máxima em km
+  
+  // Comissão da plataforma
+  platformCommissionPercent Float @default(10)    // % que a plataforma fica
+  
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+}
