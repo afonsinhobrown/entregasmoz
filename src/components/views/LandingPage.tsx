@@ -1,6 +1,7 @@
 'use client'
 
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
+import dynamic from 'next/dynamic'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
@@ -12,6 +13,12 @@ import { Textarea } from '@/components/ui/textarea'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Separator } from '@/components/ui/separator'
 
+const MapContainer = dynamic(() => import('react-leaflet').then(mod => mod.MapContainer), { ssr: false })
+const TileLayer = dynamic(() => import('react-leaflet').then(mod => mod.TileLayer), { ssr: false })
+const CircleMarker = dynamic(() => import('react-leaflet').then(mod => mod.CircleMarker), { ssr: false })
+const Popup = dynamic(() => import('react-leaflet').then(mod => mod.Popup), { ssr: false })
+const Tooltip = dynamic(() => import('react-leaflet').then(mod => mod.Tooltip), { ssr: false })
+
 // Tipos
 type UserType = 'CLIENT' | 'DELIVERY_PERSON' | 'PROVIDER' | 'ADMIN'
 type VehicleType = 'MOTORCYCLE' | 'BICYCLE' | 'CAR' | 'SCOOTER'
@@ -22,6 +29,9 @@ interface Provider {
   storeDescription?: string
   category?: string
   address?: string
+  latitude?: number
+  longitude?: number
+  storeImage?: string
   isOpen: boolean
   products: { id: string; name: string; price: number; providerId: string }[]
 }
@@ -44,11 +54,14 @@ interface DeliveryPerson {
   isAvailable: boolean
   currentLatitude?: number
   currentLongitude?: number
-  user?: { name: string }
+  plateNumber?: string
+  vehicleColor?: string
+  vehicleBrand?: string
+  user?: { name: string; phone?: string; profileImage?: string }
 }
 
 interface LandingPageProps {
-  user: { id: string; name: string; userType: UserType } | null
+  user: { id: string; name: string; userType: UserType; phone?: string; profileImage?: string; client?: { latitude?: number; longitude?: number; address?: string } } | null
   providers: Provider[]
   products: Product[]
   deliveryPersons: DeliveryPerson[]
@@ -85,6 +98,22 @@ export default function LandingPage({
   const [mainTab, setMainTab] = useState<'services' | 'delivery'>('services')
   const [selectedCategory, setSelectedCategory] = useState('all')
   const [searchQuery, setSearchQuery] = useState('')
+  const [clientLocation, setClientLocation] = useState<[number, number] | null>(null)
+
+  const mapCenter: [number, number] = clientLocation || [
+    user?.client?.latitude || -25.9653,
+    user?.client?.longitude || 32.5892,
+  ]
+
+  useEffect(() => {
+    if (!navigator.geolocation) return
+    const watcher = navigator.geolocation.watchPosition(
+      (pos) => setClientLocation([pos.coords.latitude, pos.coords.longitude]),
+      () => {},
+      { enableHighAccuracy: true, timeout: 10000, maximumAge: 30000 }
+    )
+    return () => navigator.geolocation.clearWatch(watcher)
+  }, [])
 
   // Filtrar produtos
   const getFilteredProducts = () => {
@@ -287,48 +316,102 @@ export default function LandingPage({
         {/* DELIVERY TAB */}
         {mainTab === 'delivery' && (
           <>
-            {/* Map placeholder */}
+            {/* Real-time map */}
             <Card className="mb-6 overflow-hidden shadow-xl">
-              <div className="h-80 bg-gradient-to-br from-green-50 via-blue-50 to-emerald-100 relative">
-                <div className="absolute top-4 left-4 bg-white/90 backdrop-blur-sm rounded-lg px-4 py-2 shadow-lg">
+              <div className="h-80 relative">
+                <div className="absolute top-4 left-4 bg-white/95 backdrop-blur-sm rounded-lg px-4 py-2 shadow-lg z-[500]">
                   <h3 className="font-bold text-gray-800 flex items-center gap-2">
                     🗺️ Mapa de Maputo
                     <Badge className="bg-green-500 text-xs">Ao Vivo</Badge>
                   </h3>
-                  <p className="text-xs text-gray-500">Entregadores próximos a você</p>
+                  <p className="text-xs text-gray-500">Ruas, prestadores, entregadores e você</p>
                 </div>
 
-                {/* Delivery Person Markers */}
-                {getSortedDeliveryPersons().slice(0, 5).map((dp, i) => {
-                  const positions = [
-                    { top: '30%', left: '40%' },
-                    { top: '55%', left: '55%' },
-                    { top: '40%', left: '20%' },
-                    { top: '70%', left: '35%' },
-                    { top: '25%', left: '75%' },
-                  ]
-                  return (
-                    <div 
-                      key={dp.id}
-                      className="absolute cursor-pointer hover:scale-125 transition-transform group"
-                      style={{ top: positions[i].top, left: positions[i].left }}
-                    >
-                      <div className="bg-gradient-to-br from-green-400 to-emerald-600 rounded-full p-2 shadow-lg animate-bounce">
-                        <span className="text-xl">{vehicleIcons[dp.vehicleType]}</span>
+                <MapContainer
+                  center={mapCenter}
+                  zoom={13}
+                  style={{ height: '100%', width: '100%' }}
+                  scrollWheelZoom={true}
+                >
+                  <TileLayer
+                    attribution='&copy; OpenStreetMap contributors &copy; CARTO'
+                    url="https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png"
+                  />
+
+                  <CircleMarker center={mapCenter} radius={10} pathOptions={{ color: '#2563EB', fillColor: '#3B82F6', fillOpacity: 0.85 }}>
+                    <Tooltip direction="top" offset={[0, -8]} opacity={0.95}>👤 Você</Tooltip>
+                    <Popup>
+                      <div className="min-w-48">
+                        <div className="flex items-center gap-2 mb-2">
+                          {user?.profileImage && (
+                            <img src={user.profileImage} alt={user.name} className="w-10 h-10 rounded-full object-cover" />
+                          )}
+                          <div>
+                            <p className="font-bold">👤 {user?.name || 'Visitante'}</p>
+                            {user?.phone && <p className="text-xs text-gray-500">📞 {user.phone}</p>}
+                          </div>
+                        </div>
+                        {user?.client?.address && <p className="text-xs">📍 {user.client.address}</p>}
                       </div>
-                    </div>
-                  )
-                })}
+                    </Popup>
+                  </CircleMarker>
 
-                {/* User Location */}
-                <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2">
-                  <div className="relative">
-                    <div className="w-16 h-16 bg-blue-500/20 rounded-full animate-ping"></div>
-                    <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-6 h-6 bg-blue-500 rounded-full border-4 border-white shadow-lg flex items-center justify-center text-white text-xs">
-                      📍
-                    </div>
-                  </div>
-                </div>
+                  {getFilteredProviders().filter(p => p.latitude && p.longitude).map((provider) => (
+                    <CircleMarker
+                      key={`provider-${provider.id}`}
+                      center={[provider.latitude as number, provider.longitude as number]}
+                      radius={9}
+                      pathOptions={{ color: provider.isOpen ? '#15803D' : '#B91C1C', fillColor: provider.isOpen ? '#22C55E' : '#EF4444', fillOpacity: 0.85 }}
+                    >
+                      <Tooltip direction="top" offset={[0, -8]} opacity={0.95}>🏪 {provider.storeName}</Tooltip>
+                      <Popup>
+                        <div className="min-w-52">
+                          <div className="flex items-center gap-2 mb-2">
+                            {provider.storeImage && (
+                              <img src={provider.storeImage} alt={provider.storeName} className="w-10 h-10 rounded-lg object-cover" />
+                            )}
+                            <div>
+                              <p className="font-bold">🏪 {provider.storeName}</p>
+                              <p className="text-xs text-gray-500">{provider.category || 'Prestador'}</p>
+                            </div>
+                          </div>
+                          {provider.address && <p className="text-xs">📍 {provider.address}</p>}
+                        </div>
+                      </Popup>
+                    </CircleMarker>
+                  ))}
+
+                  {getSortedDeliveryPersons().filter(dp => dp.currentLatitude && dp.currentLongitude).map((dp) => (
+                    <CircleMarker
+                      key={`delivery-${dp.id}`}
+                      center={[dp.currentLatitude as number, dp.currentLongitude as number]}
+                      radius={8}
+                      pathOptions={{ color: '#0F766E', fillColor: dp.isAvailable ? '#10B981' : '#6B7280', fillOpacity: 0.9 }}
+                    >
+                      <Tooltip direction="top" offset={[0, -8]} opacity={0.95}>
+                        {vehicleIcons[dp.vehicleType]} {dp.user?.name || 'Entregador'}
+                      </Tooltip>
+                      <Popup>
+                        <div className="min-w-56">
+                          <div className="flex items-center gap-2 mb-2">
+                            {dp.user?.profileImage && (
+                              <img src={dp.user.profileImage} alt={dp.user.name} className="w-10 h-10 rounded-full object-cover" />
+                            )}
+                            <div>
+                              <p className="font-bold">🏍️ {dp.user?.name || 'Entregador'}</p>
+                              <p className="text-xs text-gray-500">⭐ {dp.rating.toFixed(1)} • {dp.totalDeliveries} entregas</p>
+                            </div>
+                          </div>
+                          {dp.user?.phone && <p className="text-xs">📞 {dp.user.phone}</p>}
+                          {dp.plateNumber && <p className="text-xs">🪪 {dp.plateNumber}</p>}
+                          {(dp.vehicleBrand || dp.vehicleColor) && (
+                            <p className="text-xs">🚘 {dp.vehicleBrand || ''} {dp.vehicleColor || ''}</p>
+                          )}
+                        </div>
+                      </Popup>
+                    </CircleMarker>
+                  ))}
+                </MapContainer>
               </div>
             </Card>
 

@@ -21,6 +21,7 @@ const MapContainer = dynamic(() => import('react-leaflet').then(mod => mod.MapCo
 const TileLayer = dynamic(() => import('react-leaflet').then(mod => mod.TileLayer), { ssr: false })
 const Marker = dynamic(() => import('react-leaflet').then(mod => mod.Marker), { ssr: false })
 const Popup = dynamic(() => import('react-leaflet').then(mod => mod.Popup), { ssr: false })
+const Tooltip = dynamic(() => import('react-leaflet').then(mod => mod.Tooltip), { ssr: false })
 const Circle = dynamic(() => import('react-leaflet').then(mod => mod.Circle), { ssr: false })
 const Polyline = dynamic(() => import('react-leaflet').then(mod => mod.Polyline), { ssr: false })
 
@@ -128,10 +129,13 @@ interface Order {
   totalAmount: number
   deliveryFee: number
   deliveryAddress?: string
+  deliveryLatitude?: number
+  deliveryLongitude?: number
   createdAt: string
   providerId?: string
   deliveryPersonId?: string
   items: { id: string; productId: string; quantity: number; price: number; product: Product }[]
+  client?: { id: string; address?: string; latitude?: number; longitude?: number; user?: { name: string; phone?: string; profileImage?: string } }
   provider?: { id: string; storeName: string; storeDescription?: string; category?: string; address?: string; latitude?: number; longitude?: number; storeImage?: string }
   deliveryPerson?: { id: string; user: { name: string; profileImage?: string }; rating: number; vehicleType: VehicleType; plateNumber?: string; vehicleColor?: string; vehicleBrand?: string }
   ratings?: Rating[]
@@ -656,7 +660,7 @@ function RealMap({
 }
 
 // Delivery Person Location Tracker
-function DeliveryPersonTracker({ user, cities, onLicenseRenew }: { user: User; cities: City[]; onLicenseRenew: () => void }) {
+function DeliveryPersonTracker({ user, cities, providers, mapCenter, onLicenseRenew }: { user: User; cities: City[]; providers: Provider[]; mapCenter: [number, number]; onLicenseRenew: () => void }) {
   const { location, error: locationError, loading: locationLoading } = useLocation()
   const [isAvailable, setIsAvailable] = useState(user.deliveryPerson?.isAvailable ?? false)
   const [lastUpdate, setLastUpdate] = useState<Date | null>(null)
@@ -892,6 +896,25 @@ function DeliveryPersonTracker({ user, cities, onLicenseRenew }: { user: User; c
 
   // Generate QR Code for delivery person (simplified - just shows ID)
   const deliveryPersonQR = user.deliveryPerson?.qrCode || `DEL-${user.deliveryPerson?.id?.slice(-8)}`
+  const trackerCenter: [number, number] = location || mapCenter
+
+  const trackedOrders = [...pendingOrders, ...activeOrders]
+  const providerMarkers = trackedOrders
+    .filter((o) => o.provider?.latitude && o.provider?.longitude)
+    .map((o) => o.provider)
+    .filter((p, idx, arr) => p && arr.findIndex((x) => x?.id === p.id) === idx)
+
+  const clientMarkers = trackedOrders
+    .filter((o) => o.deliveryLatitude && o.deliveryLongitude)
+    .map((o) => ({
+      orderId: o.id,
+      lat: o.deliveryLatitude as number,
+      lng: o.deliveryLongitude as number,
+      address: o.deliveryAddress,
+      clientName: o.client?.user?.name || 'Cliente',
+      clientPhone: o.client?.user?.phone,
+      clientImage: o.client?.user?.profileImage,
+    }))
 
   return (
     <>
@@ -977,6 +1000,92 @@ function DeliveryPersonTracker({ user, cities, onLicenseRenew }: { user: User; c
                 <p className="text-xs text-gray-500">MT Hoje</p>
               </div>
             </div>
+
+            {/* Operational Map */}
+            <Card className="overflow-hidden border border-blue-200">
+              <CardHeader className="py-2 bg-blue-50">
+                <CardTitle className="text-sm">🗺️ Mapa Operacional (Ruas + Prestadores + Clientes)</CardTitle>
+              </CardHeader>
+              <CardContent className="p-0">
+                <div className="h-[320px]">
+                  <MapContainer
+                    center={trackerCenter}
+                    zoom={14}
+                    style={{ height: '100%', width: '100%' }}
+                    scrollWheelZoom={true}
+                  >
+                    <TileLayer
+                      attribution='&copy; OpenStreetMap contributors &copy; CARTO'
+                      url="https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png"
+                    />
+
+                    <Marker
+                      position={trackerCenter}
+                      icon={createCustomIcon('📍', '#2563EB', user.profileImage)}
+                    >
+                      <Tooltip direction="top" offset={[0, -16]} opacity={0.95}>
+                        <div className="text-xs font-medium">Você: {user.name}</div>
+                      </Tooltip>
+                      <Popup>
+                        <div className="text-sm min-w-44">
+                          <p className="font-bold">📍 {user.name}</p>
+                          <p className="text-xs text-gray-500">Localização atual do entregador</p>
+                          {user.deliveryPerson?.plateNumber && (
+                            <p className="text-xs mt-1">🪪 {user.deliveryPerson.plateNumber}</p>
+                          )}
+                        </div>
+                      </Popup>
+                    </Marker>
+
+                    {providerMarkers.map((provider) => (
+                      <Marker
+                        key={`provider-${provider!.id}`}
+                        position={[provider!.latitude as number, provider!.longitude as number]}
+                        icon={createCustomIcon('🏪', '#F97316', provider!.storeImage)}
+                      >
+                        <Tooltip direction="top" offset={[0, -16]} opacity={0.95}>
+                          <div className="text-xs font-medium">Prestador: {provider!.storeName}</div>
+                        </Tooltip>
+                        <Popup>
+                          <div className="text-sm min-w-52">
+                            <p className="font-bold">🏪 {provider!.storeName}</p>
+                            <p className="text-xs text-gray-600">{provider!.category || 'Prestador'}</p>
+                            {provider!.address && <p className="text-xs mt-1">📍 {provider!.address}</p>}
+                          </div>
+                        </Popup>
+                      </Marker>
+                    ))}
+
+                    {clientMarkers.map((clientPoint) => (
+                      <Marker
+                        key={`client-${clientPoint.orderId}`}
+                        position={[clientPoint.lat, clientPoint.lng]}
+                        icon={createCustomIcon('👤', '#7C3AED', clientPoint.clientImage)}
+                      >
+                        <Tooltip direction="top" offset={[0, -16]} opacity={0.95}>
+                          <div className="text-xs font-medium">Cliente: {clientPoint.clientName}</div>
+                        </Tooltip>
+                        <Popup>
+                          <div className="text-sm min-w-56">
+                            <div className="flex items-center gap-2 mb-2">
+                              {clientPoint.clientImage && (
+                                <img src={clientPoint.clientImage} alt={clientPoint.clientName} className="w-10 h-10 rounded-full object-cover" />
+                              )}
+                              <div>
+                                <p className="font-bold">👤 {clientPoint.clientName}</p>
+                                <p className="text-xs text-gray-500">Pedido #{clientPoint.orderId.slice(-6)}</p>
+                              </div>
+                            </div>
+                            {clientPoint.clientPhone && <p className="text-xs">📞 {clientPoint.clientPhone}</p>}
+                            {clientPoint.address && <p className="text-xs mt-1">📍 {clientPoint.address}</p>}
+                          </div>
+                        </Popup>
+                      </Marker>
+                    ))}
+                  </MapContainer>
+                </div>
+              </CardContent>
+            </Card>
 
             {/* Cash on Hand */}
             <div className="p-3 bg-yellow-50 rounded-lg border border-yellow-200">
@@ -3203,38 +3312,14 @@ export default function Home() {
         {/* DELIVERY PERSON DASHBOARD */}
         {user?.userType === 'DELIVERY_PERSON' && (
           <div className="space-y-4">
-            <DeliveryPersonTracker user={user} cities={cities} onLicenseRenew={refreshData} />
-            
-            {/* Mini Map showing delivery person's location */}
-            {mapLoaded && userLocation && (
-              <Card className="shadow-lg">
-                <CardHeader className="py-3 bg-gradient-to-r from-blue-500 to-indigo-600 text-white">
-                  <CardTitle className="text-lg flex items-center gap-2">
-                    🗺️ Sua Localização no Mapa
-                  </CardTitle>
-                </CardHeader>
-                <CardContent className="p-0">
-                  <div className="h-[300px] rounded-b-lg overflow-hidden">
-                    <MapContainer
-                      center={userLocation}
-                      zoom={15}
-                      style={{ height: '100%', width: '100%' }}
-                      scrollWheelZoom={true}
-                    >
-                      <TileLayer
-                        attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
-                        url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-                      />
-                      <Circle 
-                        center={userLocation} 
-                        radius={200}
-                        pathOptions={{ color: '#10B981', fillColor: '#10B981', fillOpacity: 0.2 }}
-                      />
-                      <MiniMapMarker position={userLocation} />
-                    </MapContainer>
-                  </div>
-                </CardContent>
-              </Card>
+            {userLocation && (
+              <DeliveryPersonTracker
+                user={user}
+                cities={cities}
+                providers={providers}
+                mapCenter={userLocation}
+                onLicenseRenew={refreshData}
+              />
             )}
           </div>
         )}
