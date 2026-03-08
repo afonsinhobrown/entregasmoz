@@ -2681,6 +2681,12 @@ export default function Home() {
     setLoading(true)
     try {
       // Validate required fields
+      if (!registerForm.cityId) {
+        alert('Cidade é obrigatória para concluir o cadastro!')
+        setLoading(false)
+        return
+      }
+
       if (registerForm.userType === 'DELIVERY_PERSON' && !registerForm.plateNumber) {
         alert('Matrícula é obrigatória para entregadores!')
         setLoading(false)
@@ -3069,7 +3075,7 @@ export default function Home() {
 
               {/* City Selection */}
               <div className="space-y-1">
-                <Label>Cidade</Label>
+                <Label>Cidade *</Label>
                 <Select value={registerForm.cityId} onValueChange={(v) => setRegisterForm({ ...registerForm, cityId: v })}>
                   <SelectTrigger><SelectValue placeholder="Selecione sua cidade" /></SelectTrigger>
                   <SelectContent>
@@ -3078,6 +3084,7 @@ export default function Home() {
                     ))}
                   </SelectContent>
                 </Select>
+                {!registerForm.cityId && <p className="text-xs text-red-500">Cidade é obrigatória</p>}
               </div>
 
               {registerForm.userType === 'CLIENT' && (
