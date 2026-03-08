@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">EntregasMoz</string>
+    <string name="title_activity_main">EntregasMoz</string>
+    <string name="package_name">com.entregasmoz.app</string>
+    <string name="custom_url_scheme">com.entregasmoz.app</string>
+</resources>
