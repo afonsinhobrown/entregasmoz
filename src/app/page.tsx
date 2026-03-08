@@ -411,30 +411,32 @@ function useLocation() {
     getLeaflet()
 
     if (!navigator.geolocation) {
-      setTimeout(() => {
-        setError('Geolocalização não suportada')
-        setLoading(false)
-      }, 0)
+      setError('Geolocalização não suportada')
+      setLoading(false)
       return
     }
 
-    const watchId = navigator.geolocation.watchPosition(
+    let watchId: number | undefined
+
+    watchId = navigator.geolocation.watchPosition(
       (pos) => {
         setLocation([pos.coords.latitude, pos.coords.longitude])
         setLoading(false)
         setError(null)
       },
       () => {
-        setTimeout(() => {
-          setError('Usando localização padrão (Maputo)')
-          setLocation(MAPUTO_CENTER)
-          setLoading(false)
-        }, 0)
+        setError('Usando localização padrão (Maputo)')
+        setLocation(MAPUTO_CENTER)
+        setLoading(false)
       },
       { enableHighAccuracy: true, timeout: 10000, maximumAge: 30000 }
     )
 
-    return () => navigator.geolocation.clearWatch(watchId)
+    return () => {
+      if (watchId !== undefined) {
+        navigator.geolocation.clearWatch(watchId)
+      }
+    }
   }, [])
 
   return { location, error, loading }

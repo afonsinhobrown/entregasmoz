@@ -125,6 +125,7 @@ export async function POST(request: Request) {
             vehicleColor: normalizeOptionalString(additionalData.vehicleColor),
             vehicleBrand: normalizeOptionalString(additionalData.vehicleBrand),
             qrCode,
+            isAvailable: true, // Begin as available
             currentLatitude: -25.9653,
             currentLongitude: 32.5892,
             cityId: normalizedCityId,

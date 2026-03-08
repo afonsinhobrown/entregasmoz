@@ -108,7 +108,8 @@ export default function LandingPage({
 
   useEffect(() => {
     if (!navigator.geolocation) return
-    const watcher = navigator.geolocation.watchPosition(
+    let watcher: number
+    watcher = navigator.geolocation.watchPosition(
       (pos) => setClientLocation([pos.coords.latitude, pos.coords.longitude]),
       () => { },
       { enableHighAccuracy: true, timeout: 10000, maximumAge: 30000 }
@@ -116,6 +117,7 @@ export default function LandingPage({
     return () => navigator.geolocation.clearWatch(watcher)
   }, [])
 
+  // Calcular distância em KM (haversine)
   const distanceKm = (from: [number, number], to: [number, number]) => {
     const [lat1, lon1] = from
     const [lat2, lon2] = to
@@ -131,25 +133,7 @@ export default function LandingPage({
     return R * c
   }
 
-  const nearestProviders = getFilteredProviders()
-    .filter((p) => p.latitude && p.longitude)
-    .map((p) => ({
-      provider: p,
-      distance: distanceKm(mapCenter, [p.latitude as number, p.longitude as number]),
-    }))
-    .sort((a, b) => a.distance - b.distance)
-    .slice(0, 3)
-
-  const nearestDeliveryPersons = getSortedDeliveryPersons()
-    .filter((dp) => dp.currentLatitude && dp.currentLongitude)
-    .map((dp) => ({
-      dp,
-      distance: distanceKm(mapCenter, [dp.currentLatitude as number, dp.currentLongitude as number]),
-    }))
-    .sort((a, b) => a.distance - b.distance)
-    .slice(0, 3)
-
-  // Filtrar produtos
+  // Filtrar e ordenar produtos
   const getFilteredProducts = () => {
     let filtered = products
     if (selectedCategory !== 'all') {
@@ -167,7 +151,7 @@ export default function LandingPage({
     return filtered
   }
 
-  // Filtrar prestadores
+  // Filtrar prestadores de serviço
   const getFilteredProviders = () => {
     let filtered = providers
     if (selectedCategory !== 'all') {
@@ -188,7 +172,7 @@ export default function LandingPage({
     return Math.random() * 3 + 0.5
   }
 
-  // Tempo estimado
+  // Tempo estimado de entrega
   const calculateTime = (distance: number, vehicle: VehicleType): number => {
     const speeds = { MOTORCYCLE: 25, BICYCLE: 15, CAR: 20, SCOOTER: 22 }
     return Math.round((distance / speeds[vehicle]) * 60)
@@ -202,6 +186,25 @@ export default function LandingPage({
   }
 
   const formatCurrency = (value: number) => `${value.toLocaleString('pt-MZ')} MT`
+
+  // Agora usar as funções
+  const nearestProviders = getFilteredProviders()
+    .filter((p) => p.latitude && p.longitude)
+    .map((p) => ({
+      provider: p,
+      distance: distanceKm(mapCenter, [p.latitude as number, p.longitude as number]),
+    }))
+    .sort((a, b) => a.distance - b.distance)
+    .slice(0, 3)
+
+  const nearestDeliveryPersons = getSortedDeliveryPersons()
+    .filter((dp) => dp.currentLatitude && dp.currentLongitude)
+    .map((dp) => ({
+      dp,
+      distance: distanceKm(mapCenter, [dp.currentLatitude as number, dp.currentLongitude as number]),
+    }))
+    .sort((a, b) => a.distance - b.distance)
+    .slice(0, 3)
 
   return (
     <div className="flex gap-6">

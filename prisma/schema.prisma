@@ -150,7 +150,7 @@ model DeliveryPerson {
   // QR Code único do entregador
   qrCode           String      @unique  // Código QR único para identificação
   
-  isAvailable      Boolean     @default(false)
+  isAvailable      Boolean     @default(true)
   currentLatitude  Float?
   currentLongitude Float?
   rating           Float       @default(5.0)
