@@ -15,6 +15,25 @@ Antes de começar, você precisa ter instalado no seu computador:
 
 ## 🛠️ Como Rodar o Projeto
 
+### Opção A: Banco Cloud (Neon, sem Supabase) - Recomendado
+1. Crie uma base PostgreSQL na Neon.
+2. Copie a connection string e coloque em `DATABASE_URL` no arquivo `.env`.
+3. Defina também `DIRECT_URL` com a conexão direta (sem pool), se disponível.
+4. Execute:
+
+```bash
+npm run db:generate
+npm run db:deploy
+npm run seed
+```
+
+Exemplo de `.env`:
+
+```bash
+DATABASE_URL="postgresql://USER:PASSWORD@ep-xxxx.region.aws.neon.tech/DB_NAME?sslmode=require"
+DIRECT_URL="postgresql://USER:PASSWORD@ep-xxxx.region.aws.neon.tech/DB_NAME?sslmode=require"
+```
+
 ### Passo 1: Descompactar
 Descompacte o arquivo `entregasmoz.zip` em uma pasta no seu computador.
 
@@ -119,8 +138,54 @@ npm run seed
 - **TypeScript** - Linguagem de programação
 - **Tailwind CSS** - Estilização
 - **Prisma** - Banco de dados
-- **SQLite** - Banco de dados local
+- **PostgreSQL (Cloud)** - Banco de dados em produção
 - **shadcn/ui** - Componentes bonitos
+
+---
+
+## 🌐 Deploy para Produção (100% Grátis)
+
+### ⚡ Deploy Rápido com Fly.io (5 minutos)
+
+**Opção 1 - Scripts Automáticos:**
+```bash
+# Setup inicial (só uma vez)
+.\setup-fly.ps1
+
+# Deploy
+.\deploy-fly.ps1
+```
+
+**Opção 2 - Manual:**
+```bash
+# Instalar CLI
+powershell -Command "iwr https://fly.io/install.ps1 -useb | iex"
+
+# Login e setup
+fly auth login
+fly launch --no-deploy
+fly secrets set DATABASE_URL="postgresql://..."
+fly secrets set DIRECT_URL="postgresql://..."
+
+# Deploy
+fly deploy
+fly open
+```
+
+📖 **Guia completo:** [FLY.md](FLY.md)
+
+### 🆓 Outras Opções Gratuitas
+
+Ver [DEPLOY-GRATIS.md](DEPLOY-GRATIS.md):
+- **Fly.io** - 3 apps, 256MB RAM (Recomendado)
+- **Koyeb** - 1 app, 512MB RAM
+- **Adaptable** - Apps ilimitadas
+- **Zeabur** - $5 crédito/mês
+
+### 💰 Opções Pagas
+
+Ver [DEPLOY.md](DEPLOY.md):
+- DigitalOcean, AWS Lightsail, outros
 
 ---
 
