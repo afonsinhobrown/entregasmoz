@@ -116,7 +116,7 @@ export async function POST(request: Request) {
       } else if (userType === 'DELIVERY_PERSON') {
         // Gerar QR Code único para o entregador
         const qrCode = generateDeliveryQRCode();
-        
+
         await tx.deliveryPerson.create({
           data: {
             userId: newUser.id,

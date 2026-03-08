@@ -42,7 +42,7 @@ interface User {
   profileImage?: string
   qrCode?: string
   client?: { id: string; address?: string; latitude?: number; longitude?: number; cityId?: string }
-  deliveryPerson?: { 
+  deliveryPerson?: {
     id: string
     vehicleType: VehicleType
     isAvailable: boolean
@@ -59,7 +59,7 @@ interface User {
     vehicleBrand?: string
     cashOnHand?: number
   }
-  provider?: { 
+  provider?: {
     id: string
     storeName: string
     storeDescription?: string
@@ -300,10 +300,10 @@ function calculateDistance(lat1: number, lon1: number, lat2: number, lon2: numbe
   const R = 6371
   const dLat = (lat2 - lat1) * Math.PI / 180
   const dLon = (lon2 - lon1) * Math.PI / 180
-  const a = Math.sin(dLat/2) * Math.sin(dLat/2) +
-    Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * 
-    Math.sin(dLon/2) * Math.sin(dLon/2)
-  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a))
+  const a = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+    Math.sin(dLon / 2) * Math.sin(dLon / 2)
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a))
   return R * c
 }
 
@@ -353,7 +353,7 @@ const getLeaflet = async () => {
 // Custom marker icon
 const createCustomIcon = (emoji: string, color: string = 'blue', photoUrl?: string) => {
   if (typeof window === 'undefined' || !leafletLib) return null
-  
+
   if (photoUrl) {
     return leafletLib.divIcon({
       html: `<div style="width: 44px; height: 44px; border-radius: 50%; display: flex; align-items: center; justify-content: center; box-shadow: 0 2px 8px rgba(0,0,0,0.3); border: 3px solid ${color}; overflow: hidden; background: ${color};">
@@ -364,7 +364,7 @@ const createCustomIcon = (emoji: string, color: string = 'blue', photoUrl?: stri
       iconAnchor: [22, 22],
     })
   }
-  
+
   return leafletLib.divIcon({
     html: `<div style="background: ${color}; width: 36px; height: 36px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 18px; box-shadow: 0 2px 8px rgba(0,0,0,0.3); border: 3px solid white;">${emoji}</div>`,
     className: 'custom-marker',
@@ -376,16 +376,16 @@ const createCustomIcon = (emoji: string, color: string = 'blue', photoUrl?: stri
 // Mini map marker component that ensures leaflet is loaded
 function MiniMapMarker({ position }: { position: [number, number] }) {
   const [icon, setIcon] = useState<L.DivIcon | null>(null)
-  
+
   useEffect(() => {
     getLeaflet().then(() => {
       const newIcon = createCustomIcon('🏍️', '#10B981')
       setTimeout(() => setIcon(newIcon), 0)
     })
   }, [])
-  
+
   if (!icon) return null
-  
+
   return (
     <Marker position={position} icon={icon}>
       <Popup>
@@ -409,7 +409,7 @@ function useLocation() {
   useEffect(() => {
     // Load leaflet library
     getLeaflet()
-    
+
     if (!navigator.geolocation) {
       setTimeout(() => {
         setError('Geolocalização não suportada')
@@ -441,17 +441,17 @@ function useLocation() {
 }
 
 // Real Map Component
-function RealMap({ 
-  userLocation, 
-  providers, 
-  deliveryPersons, 
-  user, 
+function RealMap({
+  userLocation,
+  providers,
+  deliveryPersons,
+  user,
   onLoginClick,
   onProviderSelect,
   trackingPoints,
   orderRoute,
   showRoute
-}: { 
+}: {
   userLocation: [number, number]
   providers: Provider[]
   deliveryPersons: DeliveryPerson[]
@@ -474,16 +474,16 @@ function RealMap({
           attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
           url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
         />
-        
+
         {/* User Location Circle */}
-        <Circle 
-          center={userLocation} 
+        <Circle
+          center={userLocation}
           radius={500}
           pathOptions={{ color: '#3B82F6', fillColor: '#3B82F6', fillOpacity: 0.15 }}
         />
-        
+
         {/* User Location Marker */}
-        <Marker 
+        <Marker
           position={userLocation}
           icon={createCustomIcon('📍', '#3B82F6', user?.profileImage)}
         >
@@ -501,13 +501,13 @@ function RealMap({
         {showRoute && orderRoute && (
           <>
             {/* Provider to Client route */}
-            <Polyline 
+            <Polyline
               positions={[orderRoute.provider, orderRoute.client]}
               pathOptions={{ color: '#F97316', weight: 3, opacity: 0.7, dashArray: '10, 10' }}
             />
             {/* Delivery person to Provider route */}
             {orderRoute.deliveryPerson && (
-              <Polyline 
+              <Polyline
                 positions={[orderRoute.deliveryPerson, orderRoute.provider]}
                 pathOptions={{ color: '#22C55E', weight: 3, opacity: 0.7, dashArray: '5, 10' }}
               />
@@ -517,7 +517,7 @@ function RealMap({
 
         {/* Tracking Polyline */}
         {trackingPoints && trackingPoints.length > 1 && (
-          <Polyline 
+          <Polyline
             positions={trackingPoints.map(p => [p.latitude, p.longitude])}
             pathOptions={{ color: '#8B5CF6', weight: 4, opacity: 0.8 }}
           />
@@ -532,9 +532,9 @@ function RealMap({
           const deliveryFee = calculateDeliveryFee(distance)
           const emoji = provider.category === 'Restaurante' ? '🍴' : provider.category === 'Pizzaria' ? '🍕' : '🛒'
           const color = provider.isOpen ? '#22C55E' : '#EF4444'
-          
+
           return (
-            <Marker 
+            <Marker
               key={provider.id}
               position={[lat, lng]}
               icon={createCustomIcon(emoji, color, provider.storeImage)}
@@ -571,8 +571,8 @@ function RealMap({
                       <span className="font-bold text-purple-600">{deliveryFee} MT</span>
                     </div>
                   </div>
-                  <Button 
-                    size="sm" 
+                  <Button
+                    size="sm"
                     className="w-full mt-2 bg-gradient-to-r from-orange-500 to-red-500"
                     onClick={() => onProviderSelect(provider)}
                   >
@@ -590,9 +590,9 @@ function RealMap({
           const lng = dp.currentLongitude!
           const distance = calculateDistance(userLocation[0], userLocation[1], lat, lng)
           const timeMinutes = calculateTime(distance, dp.vehicleType)
-          
+
           return (
-            <Marker 
+            <Marker
               key={dp.id}
               position={[lat, lng]}
               icon={createCustomIcon(vehicleIcons[dp.vehicleType], '#10B981', dp.user?.profileImage)}
@@ -692,20 +692,20 @@ function DeliveryPersonTracker({ user, cities, providers, mapCenter, onLicenseRe
         const data = await res.json()
         const orders = data.orders || []
         const today = new Date().toDateString()
-        const todayOrders = orders.filter((o: Order) => 
+        const todayOrders = orders.filter((o: Order) =>
           new Date(o.createdAt).toDateString() === today && o.status === 'DELIVERED'
         )
-        
+
         // Separate pending and active orders
         const pending = orders.filter((o: Order) => o.status === 'READY')
         const active = orders.filter((o: Order) => ['PICKED_UP', 'CONFIRMED', 'PREPARING'].includes(o.status))
-        
+
         setTimeout(() => {
           setPendingOrders(pending)
           setActiveOrders(active)
           setTodayDeliveries(todayOrders.length)
           setTodayEarnings(todayOrders.reduce((sum: number, o: Order) => sum + (o.deliveryFee * 0.8), 0))
-          
+
           // Calculate cash on hand from CASH payments not yet transferred
           const cashOrders = orders.filter((o: Order) => o.paymentMethod === 'CASH' && o.status === 'DELIVERED' && !o.transferReceipt)
           setCashOnHand(cashOrders.reduce((sum: number, o: Order) => sum + o.totalAmount + o.deliveryFee, 0))
@@ -772,7 +772,7 @@ function DeliveryPersonTracker({ user, cities, providers, mapCenter, onLicenseRe
   const toggleAvailability = async () => {
     const newAvailable = !isAvailable
     setIsAvailable(newAvailable)
-    
+
     if (location) {
       await fetch('/api/location', {
         method: 'PATCH',
@@ -852,7 +852,7 @@ function DeliveryPersonTracker({ user, cities, providers, mapCenter, onLicenseRe
         }),
       })
       // Update local state
-      setActiveOrders(prev => prev.map(o => 
+      setActiveOrders(prev => prev.map(o =>
         o.id === orderId ? { ...o, isCashPaid: true } : o
       ))
     } catch (error) {
@@ -884,7 +884,7 @@ function DeliveryPersonTracker({ user, cities, providers, mapCenter, onLicenseRe
 
   const handleScanQR = () => {
     // Simulate QR code scan - look up order by QR code
-    const order = [...pendingOrders, ...activeOrders].find(o => 
+    const order = [...pendingOrders, ...activeOrders].find(o =>
       o.qrCode === scannerInput || o.id === scannerInput || o.id.slice(-6) === scannerInput
     )
     if (order) {
@@ -974,7 +974,7 @@ function DeliveryPersonTracker({ user, cities, providers, mapCenter, onLicenseRe
                 />
               </div>
             </div>
-            
+
             {/* Stats Grid */}
             <div className="grid grid-cols-4 gap-2">
               <div className="p-3 bg-orange-50 rounded-lg text-center border border-orange-200">
@@ -1195,8 +1195,8 @@ function DeliveryPersonTracker({ user, cities, providers, mapCenter, onLicenseRe
                 <p className="font-medium">Veículo</p>
                 <p className="text-sm text-gray-500">
                   {user.deliveryPerson?.vehicleType === 'MOTORCYCLE' ? 'Motocicleta' :
-                   user.deliveryPerson?.vehicleType === 'BICYCLE' ? 'Bicicleta' :
-                   user.deliveryPerson?.vehicleType === 'CAR' ? 'Carro' : 'Scooter'}
+                    user.deliveryPerson?.vehicleType === 'BICYCLE' ? 'Bicicleta' :
+                      user.deliveryPerson?.vehicleType === 'CAR' ? 'Carro' : 'Scooter'}
                 </p>
                 {user.deliveryPerson?.plateNumber && (
                   <p className="text-xs text-gray-600">🪪 {user.deliveryPerson.plateNumber}</p>
@@ -1254,7 +1254,7 @@ function DeliveryPersonTracker({ user, cities, providers, mapCenter, onLicenseRe
                 <div className="space-y-2">
                   <Label>Código do Pedido</Label>
                   <div className="flex gap-2">
-                    <Input 
+                    <Input
                       value={scannerInput}
                       onChange={e => setScannerInput(e.target.value)}
                       placeholder="Ex: ABC123 ou ID completo"
@@ -1285,11 +1285,11 @@ function DeliveryPersonTracker({ user, cities, providers, mapCenter, onLicenseRe
                       {statusConfig[selectedOrder.status].label}
                     </Badge>
                   </div>
-                  
+
                   {selectedOrder.provider && (
                     <p className="text-sm">🏪 {selectedOrder.provider.storeName}</p>
                   )}
-                  
+
                   <div className="mt-2 space-y-1">
                     {selectedOrder.items.map(item => (
                       <p key={item.id} className="text-xs text-gray-600">
@@ -1297,16 +1297,16 @@ function DeliveryPersonTracker({ user, cities, providers, mapCenter, onLicenseRe
                       </p>
                     ))}
                   </div>
-                  
+
                   <Separator className="my-2" />
-                  
+
                   <div className="flex justify-between font-bold">
                     <span>Total:</span>
                     <span className="text-green-600">
                       {(selectedOrder.totalAmount + selectedOrder.deliveryFee).toLocaleString('pt-MZ')} MT
                     </span>
                   </div>
-                  
+
                   {selectedOrder.paymentMethod === 'CASH' && (
                     <p className="text-sm text-yellow-600 font-bold mt-2">
                       💵 Pagamento em Dinheiro - Colete do cliente!
@@ -1317,7 +1317,7 @@ function DeliveryPersonTracker({ user, cities, providers, mapCenter, onLicenseRe
                 {/* Action Buttons */}
                 <div className="space-y-2">
                   {selectedOrder.status === 'READY' && (
-                    <Button 
+                    <Button
                       className="w-full bg-green-500"
                       onClick={() => confirmPickup(selectedOrder.id)}
                     >
@@ -1325,7 +1325,7 @@ function DeliveryPersonTracker({ user, cities, providers, mapCenter, onLicenseRe
                     </Button>
                   )}
                   {selectedOrder.status === 'PICKED_UP' && (
-                    <Button 
+                    <Button
                       className="w-full bg-blue-500"
                       onClick={() => confirmDelivery(selectedOrder.id)}
                     >
@@ -1359,27 +1359,27 @@ function DeliveryPersonTracker({ user, cities, providers, mapCenter, onLicenseRe
               <p className="text-sm text-gray-500">Cash em Mãos</p>
               <p className="text-2xl font-bold text-yellow-700">{cashOnHand.toLocaleString('pt-MZ')} MT</p>
             </div>
-            
+
             <div className="space-y-2">
               <Label>Valor a Transferir</Label>
-              <Input 
+              <Input
                 type="number"
                 value={transferAmount}
                 onChange={e => setTransferAmount(parseFloat(e.target.value) || 0)}
                 placeholder="Valor em MT"
               />
             </div>
-            
+
             <div className="space-y-2">
               <Label>Comprovativo (Base64 ou URL)</Label>
-              <Textarea 
+              <Textarea
                 value={transferReceipt}
                 onChange={e => setTransferReceipt(e.target.value)}
                 placeholder="Cole o comprovativo aqui..."
                 rows={3}
               />
             </div>
-            
+
             <div className="flex gap-2">
               <Button variant="outline" className="flex-1" onClick={() => setShowCashModal(false)}>
                 Cancelar
@@ -1404,8 +1404,8 @@ function DeliveryPersonTracker({ user, cities, providers, mapCenter, onLicenseRe
               .filter(l => l.isActive && !l.isTrial && (l.targetUserType === 'DELIVERY_PERSON' || l.targetUserType === 'BOTH') && ['BASIC', 'ACTIVE', 'TOP'].includes(l.type))
               .sort((a, b) => a.priceDelivery - b.priceDelivery)
               .map((license) => (
-                <Card 
-                  key={license.id} 
+                <Card
+                  key={license.id}
                   className="cursor-pointer transition-all hover:shadow-lg border"
                   onClick={() => {
                     setShowLicenseModal(false)
@@ -1489,11 +1489,11 @@ function AdminDashboard({ user, onRefresh }: { user: User; onRefresh: () => void
           fetch('/api/cities'),
           fetch('/api/admin?action=fee-configs'),
         ])
-        
+
         const [statsData, usersData, paymentsData, settingsData, licensesData, citiesData, feeConfigsData] = await Promise.all([
           statsRes.json(), usersRes.json(), paymentsRes.json(), settingsRes.json(), licensesRes.json(), citiesRes.json(), feeConfigsRes.json()
         ])
-        
+
         setTimeout(() => {
           setStats(statsData.stats || null)
           setUsers(usersData.users || [])
@@ -1815,8 +1815,8 @@ function AdminDashboard({ user, onRefresh }: { user: User; onRefresh: () => void
                         </div>
                       </div>
                     </div>
-                    <Button 
-                      size="sm" 
+                    <Button
+                      size="sm"
                       className="bg-gradient-to-r from-green-500 to-emerald-600"
                       onClick={() => {
                         setSelectedTrialUser(u)
@@ -1945,32 +1945,32 @@ function AdminDashboard({ user, onRefresh }: { user: User; onRefresh: () => void
             <div className="space-y-4">
               <div>
                 <Label>Nome</Label>
-                <Input 
-                  value={editingLicense.name} 
+                <Input
+                  value={editingLicense.name}
                   onChange={e => setEditingLicense({ ...editingLicense, name: e.target.value })}
                 />
               </div>
               <div>
                 <Label>Preço Prestador (MT)</Label>
-                <Input 
+                <Input
                   type="number"
-                  value={editingLicense.priceProvider} 
+                  value={editingLicense.priceProvider}
                   onChange={e => setEditingLicense({ ...editingLicense, priceProvider: parseFloat(e.target.value) })}
                 />
               </div>
               <div>
                 <Label>Preço Entregador (MT)</Label>
-                <Input 
+                <Input
                   type="number"
-                  value={editingLicense.priceDelivery} 
+                  value={editingLicense.priceDelivery}
                   onChange={e => setEditingLicense({ ...editingLicense, priceDelivery: parseFloat(e.target.value) })}
                 />
               </div>
               <div>
                 <Label>Duração (dias)</Label>
-                <Input 
+                <Input
                   type="number"
-                  value={editingLicense.durationDays} 
+                  value={editingLicense.durationDays}
                   onChange={e => setEditingLicense({ ...editingLicense, durationDays: parseInt(e.target.value) })}
                 />
               </div>
@@ -1991,25 +1991,25 @@ function AdminDashboard({ user, onRefresh }: { user: User; onRefresh: () => void
           <div className="space-y-4">
             <div>
               <Label>Número M-Pesa</Label>
-              <Input 
-                value={settings.mpesaNumber || ''} 
+              <Input
+                value={settings.mpesaNumber || ''}
                 onChange={e => setSettings({ ...settings, mpesaNumber: e.target.value })}
                 placeholder="84XXXXXXX"
               />
             </div>
             <div>
               <Label>Número e-Mola</Label>
-              <Input 
-                value={settings.emolaNumber || ''} 
+              <Input
+                value={settings.emolaNumber || ''}
                 onChange={e => setSettings({ ...settings, emolaNumber: e.target.value })}
                 placeholder="85XXXXXXX"
               />
             </div>
             <div>
               <Label>Taxa da Plataforma (%)</Label>
-              <Input 
+              <Input
                 type="number"
-                value={settings.platformFeePercent || 10} 
+                value={settings.platformFeePercent || 10}
                 onChange={e => setSettings({ ...settings, platformFeePercent: parseFloat(e.target.value) })}
               />
             </div>
@@ -2030,33 +2030,33 @@ function AdminDashboard({ user, onRefresh }: { user: User; onRefresh: () => void
             <div className="space-y-4">
               <div>
                 <Label>Taxa Base (MT)</Label>
-                <Input 
+                <Input
                   type="number"
-                  value={editingFeeConfig.baseFee} 
+                  value={editingFeeConfig.baseFee}
                   onChange={e => setEditingFeeConfig({ ...editingFeeConfig, baseFee: parseFloat(e.target.value) })}
                 />
               </div>
               <div>
                 <Label>Por Km (MT)</Label>
-                <Input 
+                <Input
                   type="number"
-                  value={editingFeeConfig.perKmFee} 
+                  value={editingFeeConfig.perKmFee}
                   onChange={e => setEditingFeeConfig({ ...editingFeeConfig, perKmFee: parseFloat(e.target.value) })}
                 />
               </div>
               <div>
                 <Label>Taxa Mínima (MT)</Label>
-                <Input 
+                <Input
                   type="number"
-                  value={editingFeeConfig.minFee} 
+                  value={editingFeeConfig.minFee}
                   onChange={e => setEditingFeeConfig({ ...editingFeeConfig, minFee: parseFloat(e.target.value) })}
                 />
               </div>
               <div>
                 <Label>Comissão da Plataforma (%)</Label>
-                <Input 
+                <Input
                   type="number"
-                  value={editingFeeConfig.platformCommissionPercent} 
+                  value={editingFeeConfig.platformCommissionPercent}
                   onChange={e => setEditingFeeConfig({ ...editingFeeConfig, platformCommissionPercent: parseFloat(e.target.value) })}
                 />
               </div>
@@ -2091,10 +2091,10 @@ function AdminDashboard({ user, onRefresh }: { user: User; onRefresh: () => void
                   </div>
                 </div>
               </div>
-              
+
               <div className="p-3 bg-blue-50 rounded-lg border border-blue-200">
                 <p className="text-sm text-blue-800">
-                  <strong>Duração:</strong> 10 dias<br/>
+                  <strong>Duração:</strong> 10 dias<br />
                   <strong>Expira em:</strong> {new Date(Date.now() + 10 * 24 * 60 * 60 * 1000).toLocaleDateString('pt-MZ')}
                 </p>
               </div>
@@ -2102,7 +2102,7 @@ function AdminDashboard({ user, onRefresh }: { user: User; onRefresh: () => void
               <div className="space-y-3">
                 <Label>Tipo de Trial</Label>
                 <div className="flex gap-2">
-                  <Button 
+                  <Button
                     variant={trialIsFree ? 'default' : 'outline'}
                     className={`flex-1 ${trialIsFree ? 'bg-green-500' : ''}`}
                     onClick={() => {
@@ -2114,7 +2114,7 @@ function AdminDashboard({ user, onRefresh }: { user: User; onRefresh: () => void
                   >
                     🆓 Gratuito
                   </Button>
-                  <Button 
+                  <Button
                     variant={!trialIsFree ? 'default' : 'outline'}
                     className={`flex-1 ${!trialIsFree ? 'bg-orange-500' : ''}`}
                     onClick={() => setTimeout(() => setTrialIsFree(false), 0)}
@@ -2127,7 +2127,7 @@ function AdminDashboard({ user, onRefresh }: { user: User; onRefresh: () => void
               {!trialIsFree && (
                 <div className="space-y-2">
                   <Label>Valor do Trial (MT)</Label>
-                  <Input 
+                  <Input
                     type="number"
                     value={trialPrice}
                     onChange={e => setTrialPrice(parseFloat(e.target.value) || 0)}
@@ -2137,9 +2137,9 @@ function AdminDashboard({ user, onRefresh }: { user: User; onRefresh: () => void
               )}
 
               <div className="flex gap-2">
-                <Button 
-                  variant="outline" 
-                  className="flex-1" 
+                <Button
+                  variant="outline"
+                  className="flex-1"
                   onClick={() => {
                     setShowTrialModal(false)
                     setSelectedTrialUser(null)
@@ -2149,7 +2149,7 @@ function AdminDashboard({ user, onRefresh }: { user: User; onRefresh: () => void
                 >
                   Cancelar
                 </Button>
-                <Button 
+                <Button
                   className="flex-1 bg-gradient-to-r from-green-500 to-emerald-600"
                   onClick={createTrialLicense}
                   disabled={creatingTrial || (!trialIsFree && trialPrice <= 0)}
@@ -2244,9 +2244,9 @@ function ProviderDashboard({ user, providers, onRefresh }: { user: User; provide
             <div>
               <p className="font-bold">📜 Status da Licença</p>
               <p className={`text-sm ${licenseExpired ? 'text-red-600' : daysUntilExpiry <= 7 ? 'text-yellow-600' : 'text-green-600'}`}>
-                {licenseExpired ? '❌ Sua licença expirou! Renove para continuar operando.' : 
-                 daysUntilExpiry <= 7 ? `⚠️ Sua licença expira em ${daysUntilExpiry} dias.` :
-                 `✅ Licença ativa - ${daysUntilExpiry} dias restantes`}
+                {licenseExpired ? '❌ Sua licença expirou! Renove para continuar operando.' :
+                  daysUntilExpiry <= 7 ? `⚠️ Sua licença expira em ${daysUntilExpiry} dias.` :
+                    `✅ Licença ativa - ${daysUntilExpiry} dias restantes`}
               </p>
             </div>
             <Button onClick={() => setShowLicenseModal(true)} variant={licenseExpired ? 'destructive' : 'default'}>
@@ -2370,8 +2370,8 @@ function ProviderDashboard({ user, providers, onRefresh }: { user: User; provide
               .filter(l => l.isActive && !l.isTrial && (l.targetUserType === 'PROVIDER' || l.targetUserType === 'BOTH') && ['STARTER', 'GROW', 'PRO'].includes(l.type))
               .sort((a, b) => a.priceProvider - b.priceProvider)
               .map((license) => (
-                <Card 
-                  key={license.id} 
+                <Card
+                  key={license.id}
                   className={`cursor-pointer transition-all hover:shadow-lg ${selectedLicense?.id === license.id ? 'ring-2 ring-green-500 shadow-lg' : 'border'}`}
                   onClick={() => setSelectedLicense(license)}
                 >
@@ -2425,7 +2425,7 @@ function ProviderDashboard({ user, providers, onRefresh }: { user: User; provide
                   </Button>
                 ))}
               </div>
-              <Button 
+              <Button
                 className="w-full mt-4 bg-gradient-to-r from-green-500 to-emerald-600"
                 onClick={() => {
                   setShowLicenseModal(false)
@@ -2524,12 +2524,12 @@ function ProviderDashboard({ user, providers, onRefresh }: { user: User; provide
 }
 
 // Rating Modal Component
-function RatingModal({ 
-  order, 
-  user, 
-  onClose, 
-  onSubmit 
-}: { 
+function RatingModal({
+  order,
+  user,
+  onClose,
+  onSubmit
+}: {
   order: Order
   user: User
   onClose: () => void
@@ -2651,7 +2651,7 @@ export default function Home() {
   const [authTab, setAuthTab] = useState<'login' | 'register'>('login')
   const [showAuthModal, setShowAuthModal] = useState(false)
   const [mapLoaded, setMapLoaded] = useState(false)
-  
+
   const [registerForm, setRegisterForm] = useState({
     name: '', email: '', password: '', phone: '', userType: 'CLIENT' as UserType,
     address: '', vehicleType: 'MOTORCYCLE' as VehicleType, plateNumber: '',
@@ -2662,7 +2662,7 @@ export default function Home() {
     storeImage: '',
   })
   const [loginForm, setLoginForm] = useState({ email: '', password: '' })
-  
+
   const [providers, setProviders] = useState<Provider[]>([])
   const [allProducts, setAllProducts] = useState<Product[]>([])
   const [deliveryPersons, setDeliveryPersons] = useState<DeliveryPerson[]>([])
@@ -2670,7 +2670,7 @@ export default function Home() {
   const [orders, setOrders] = useState<Order[]>([])
   const [availableDeliveryPersons, setAvailableDeliveryPersons] = useState<DeliveryPerson[]>([])
   const [cities, setCities] = useState<City[]>([])
-  
+
   const [selectedCategory, setSelectedCategory] = useState('all')
   const [searchQuery, setSearchQuery] = useState('')
   const [view, setView] = useState<'landing' | 'cart' | 'checkout' | 'orders' | 'delivery-request'>('landing')
@@ -2739,7 +2739,7 @@ export default function Home() {
       }
     }
     loadPublicData()
-    
+
     // Refresh data every 5 seconds for near real-time updates
     const interval = setInterval(loadPublicData, 5000)
     return () => clearInterval(interval)
@@ -2801,7 +2801,7 @@ export default function Home() {
         setLoading(false)
         return
       }
-      
+
       const body: Record<string, unknown> = {
         name: registerForm.name, email: registerForm.email, password: registerForm.password,
         phone: registerForm.phone, userType: registerForm.userType,
@@ -2879,7 +2879,7 @@ export default function Home() {
 
   const getCartTotal = () => cart.reduce((total, item) => total + item.product.price * item.quantity, 0)
   const getCartItemCount = () => cart.reduce((count, item) => count + item.quantity, 0)
-  
+
   const getDeliveryFee = useCallback(() => {
     if (!userLocation || cart.length === 0) return 100
     const firstProduct = cart[0].product
@@ -2892,14 +2892,14 @@ export default function Home() {
   const proceedToCheckout = async () => {
     if (!user) { setShowAuthModal(true); return }
     if (cart.length === 0) return
-    
+
     const firstProduct = cart[0].product
     const provider = providers.find(p => p.id === firstProduct.providerId)
-    
+
     try {
       const res = await fetch('/api/delivery-persons')
       const data = await res.json()
-      
+
       // Calculate delivery fee and time for each delivery person
       const deliveryPersonsWithFees = (data.deliveryPersons || [])
         .filter((dp: DeliveryPerson) => dp.isAvailable && dp.currentLatitude && dp.currentLongitude)
@@ -2913,7 +2913,7 @@ export default function Home() {
           const totalDistance = distanceToProvider + distanceToClient
           const fee = calculateDeliveryFee(totalDistance)
           const time = calculateTime(totalDistance, dp.vehicleType)
-          
+
           return {
             ...dp,
             distance: totalDistance,
@@ -2922,7 +2922,7 @@ export default function Home() {
           }
         })
         .sort((a: DeliveryPerson, b: DeliveryPerson) => a.distance - b.distance)
-      
+
       setAvailableDeliveryPersons(deliveryPersonsWithFees)
       setView('checkout')
     } catch (error) {
@@ -2940,7 +2940,7 @@ export default function Home() {
       // Calculate delivery fee using API
       const provider = providers.find(p => p.id === providerId)
       let deliveryFee = getDeliveryFee()
-      
+
       if (provider?.latitude && provider?.longitude && userLocation) {
         try {
           const feeRes = await fetch('/api/delivery-fee', {
@@ -2975,7 +2975,7 @@ export default function Home() {
         }),
       })
       const data = await res.json()
-      
+
       if (data.order) {
         setCart([])
         setSelectedDeliveryPerson(null)
@@ -3007,7 +3007,7 @@ export default function Home() {
       })
     }
     if (searchQuery) {
-      filtered = filtered.filter(p => 
+      filtered = filtered.filter(p =>
         p.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
         p.description?.toLowerCase().includes(searchQuery.toLowerCase())
       )
@@ -3021,7 +3021,7 @@ export default function Home() {
       filtered = filtered.filter(p => p.category === selectedCategory)
     }
     if (searchQuery) {
-      filtered = filtered.filter(p => 
+      filtered = filtered.filter(p =>
         p.storeName.toLowerCase().includes(searchQuery.toLowerCase()) ||
         p.storeDescription?.toLowerCase().includes(searchQuery.toLowerCase())
       )
@@ -3070,7 +3070,7 @@ export default function Home() {
               <p className="text-xs text-white/80">Entregas em Moçambique</p>
             </div>
           </div>
-          
+
           <div className="flex items-center gap-2">
             {user ? (
               <>
@@ -3136,9 +3136,9 @@ export default function Home() {
                   {registerForm.profileImage && (
                     <img src={registerForm.profileImage} alt="Preview" className="w-16 h-16 rounded-full object-cover border-2 border-orange-500" />
                   )}
-                  <Input 
-                    type="file" 
-                    accept="image/*" 
+                  <Input
+                    type="file"
+                    accept="image/*"
                     onChange={e => {
                       const file = e.target.files?.[0]
                       if (file) {
@@ -3219,8 +3219,8 @@ export default function Home() {
                   </div>
                   <div className="space-y-1">
                     <Label>Matrícula <span className="text-red-500">*</span></Label>
-                    <Input 
-                      value={registerForm.plateNumber} 
+                    <Input
+                      value={registerForm.plateNumber}
                       onChange={e => setRegisterForm({ ...registerForm, plateNumber: e.target.value })}
                       placeholder="Obrigatório"
                       className={!registerForm.plateNumber ? 'border-red-300' : ''}
@@ -3230,16 +3230,16 @@ export default function Home() {
                   <div className="grid grid-cols-2 gap-2">
                     <div className="space-y-1">
                       <Label>Marca do Veículo <span className="text-gray-400 text-xs">(opcional)</span></Label>
-                      <Input 
-                        value={registerForm.vehicleBrand} 
+                      <Input
+                        value={registerForm.vehicleBrand}
                         onChange={e => setRegisterForm({ ...registerForm, vehicleBrand: e.target.value })}
                         placeholder="Ex: Honda"
                       />
                     </div>
                     <div className="space-y-1">
                       <Label>Cor do Veículo <span className="text-gray-400 text-xs">(opcional)</span></Label>
-                      <Input 
-                        value={registerForm.vehicleColor} 
+                      <Input
+                        value={registerForm.vehicleColor}
                         onChange={e => setRegisterForm({ ...registerForm, vehicleColor: e.target.value })}
                         placeholder="Ex: Vermelho"
                       />
@@ -3275,9 +3275,9 @@ export default function Home() {
                       {registerForm.storeImage && (
                         <img src={registerForm.storeImage} alt="Preview" className="w-16 h-16 rounded-lg object-cover border-2 border-green-500" />
                       )}
-                      <Input 
-                        type="file" 
-                        accept="image/*" 
+                      <Input
+                        type="file"
+                        accept="image/*"
                         onChange={e => {
                           const file = e.target.files?.[0]
                           if (file) {
@@ -3430,8 +3430,8 @@ export default function Home() {
             <Card>
               <CardHeader><CardTitle className="text-sm">📍 Endereço de Entrega</CardTitle></CardHeader>
               <CardContent>
-                <Textarea 
-                  value={deliveryAddress} 
+                <Textarea
+                  value={deliveryAddress}
                   onChange={e => setDeliveryAddress(e.target.value)}
                   placeholder="Rua, número, bairro..."
                 />
@@ -3479,13 +3479,12 @@ export default function Home() {
                     <p className="text-center text-gray-500 py-4">Nenhum entregador disponível no momento</p>
                   ) : (
                     availableDeliveryPersons.slice(0, 5).map((dp) => (
-                      <div 
+                      <div
                         key={dp.id}
-                        className={`p-4 rounded-lg border-2 cursor-pointer transition-all ${
-                          selectedDeliveryPerson?.id === dp.id 
-                            ? 'border-green-500 bg-green-50' 
+                        className={`p-4 rounded-lg border-2 cursor-pointer transition-all ${selectedDeliveryPerson?.id === dp.id
+                            ? 'border-green-500 bg-green-50'
                             : 'border-gray-200 hover:border-gray-300'
-                        }`}
+                          }`}
                         onClick={() => setSelectedDeliveryPerson(dp)}
                       >
                         <div className="flex items-center gap-3">
@@ -3561,9 +3560,9 @@ export default function Home() {
               <Button variant="outline" className="flex-1" onClick={() => setView('cart')}>
                 ← Voltar
               </Button>
-              <Button 
-                className="flex-1 bg-gradient-to-r from-green-500 to-emerald-600" 
-                onClick={createOrder} 
+              <Button
+                className="flex-1 bg-gradient-to-r from-green-500 to-emerald-600"
+                onClick={createOrder}
                 disabled={loading || !deliveryAddress}
               >
                 {loading ? 'Processando...' : 'Confirmar Pedido ✓'}
@@ -3616,8 +3615,8 @@ export default function Home() {
                         <span className="text-green-600">{(order.totalAmount + order.deliveryFee).toLocaleString('pt-MZ')} MT</span>
                       </div>
                       {order.status === 'DELIVERED' && !order.ratings?.length && (
-                        <Button 
-                          size="sm" 
+                        <Button
+                          size="sm"
                           className="bg-yellow-500"
                           onClick={() => {
                             setRatingOrder(order)

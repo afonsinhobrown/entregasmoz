@@ -87,11 +87,11 @@ const categories = [
   { id: 'Lanches', name: 'Lanches', icon: '🍔' },
 ]
 
-export default function LandingPage({ 
-  user, 
-  providers, 
-  products, 
-  deliveryPersons, 
+export default function LandingPage({
+  user,
+  providers,
+  products,
+  deliveryPersons,
   onLoginClick,
   onAddToCart,
   onDeliveryRequest
@@ -110,7 +110,7 @@ export default function LandingPage({
     if (!navigator.geolocation) return
     const watcher = navigator.geolocation.watchPosition(
       (pos) => setClientLocation([pos.coords.latitude, pos.coords.longitude]),
-      () => {},
+      () => { },
       { enableHighAccuracy: true, timeout: 10000, maximumAge: 30000 }
     )
     return () => navigator.geolocation.clearWatch(watcher)
@@ -159,7 +159,7 @@ export default function LandingPage({
       })
     }
     if (searchQuery) {
-      filtered = filtered.filter(p => 
+      filtered = filtered.filter(p =>
         p.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
         p.description?.toLowerCase().includes(searchQuery.toLowerCase())
       )
@@ -174,7 +174,7 @@ export default function LandingPage({
       filtered = filtered.filter(p => p.category === selectedCategory)
     }
     if (searchQuery) {
-      filtered = filtered.filter(p => 
+      filtered = filtered.filter(p =>
         p.storeName.toLowerCase().includes(searchQuery.toLowerCase()) ||
         p.storeDescription?.toLowerCase().includes(searchQuery.toLowerCase())
       )
@@ -227,13 +227,13 @@ export default function LandingPage({
 
         {/* Main Tabs */}
         <div className="flex gap-2 mb-4">
-          <Button 
+          <Button
             className={`flex-1 py-3 text-lg font-medium ${mainTab === 'services' ? 'bg-gradient-to-r from-orange-500 to-red-500 text-white shadow-lg' : 'bg-white text-gray-700 hover:bg-gray-100'}`}
             onClick={() => setMainTab('services')}
           >
             🏪 Serviços
           </Button>
-          <Button 
+          <Button
             className={`flex-1 py-3 text-lg font-medium ${mainTab === 'delivery' ? 'bg-gradient-to-r from-green-500 to-emerald-600 text-white shadow-lg' : 'bg-white text-gray-700 hover:bg-gray-100'}`}
             onClick={() => setMainTab('delivery')}
           >
@@ -243,7 +243,7 @@ export default function LandingPage({
 
         {/* Search */}
         <div className="relative mb-4">
-          <Input 
+          <Input
             className="bg-white shadow-md pl-12 py-3 text-lg border-0"
             placeholder="🔍 Buscar serviços, restaurantes, produtos..."
             value={searchQuery}
@@ -255,7 +255,7 @@ export default function LandingPage({
         <div className="bg-white rounded-xl shadow-md p-3 mb-6 overflow-x-auto">
           <div className="flex gap-2">
             {categories.map(cat => (
-              <Button 
+              <Button
                 key={cat.id}
                 variant={selectedCategory === cat.id ? 'default' : 'ghost'}
                 className={`rounded-full whitespace-nowrap px-4 py-2 ${selectedCategory === cat.id ? 'bg-gradient-to-r from-orange-500 to-red-500 text-white shadow-md' : 'hover:bg-gray-100'}`}
@@ -275,7 +275,7 @@ export default function LandingPage({
               🏪 Serviços Disponíveis
               <Badge variant="secondary" className="text-sm">{getFilteredProviders().length}</Badge>
             </h2>
-            
+
             <div className="space-y-4 mb-8">
               {getFilteredProviders().map(provider => (
                 <Card key={provider.id} className="cursor-pointer transition-all duration-300 hover:shadow-xl hover:-translate-y-1 overflow-hidden">
@@ -309,16 +309,16 @@ export default function LandingPage({
               🍽️ Produtos em Destaque
               <Badge variant="secondary" className="text-sm">{getFilteredProducts().length}</Badge>
             </h2>
-            
+
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               {getFilteredProducts().map(product => (
                 <Card key={product.id} className="overflow-hidden hover:shadow-lg cursor-pointer transition-all duration-300 hover:-translate-y-1">
                   <CardContent className="p-4">
                     <div className="flex gap-4">
                       <div className="w-20 h-20 bg-gradient-to-br from-gray-100 to-gray-200 rounded-xl flex items-center justify-center text-3xl shrink-0">
-                        {product.name.toLowerCase().includes('pizza') ? '🍕' : 
-                         product.name.toLowerCase().includes('coca') || product.name.toLowerCase().includes('bebida') ? '🥤' : 
-                         product.name.toLowerCase().includes('hamb') ? '🍔' : '🍽️'}
+                        {product.name.toLowerCase().includes('pizza') ? '🍕' :
+                          product.name.toLowerCase().includes('coca') || product.name.toLowerCase().includes('bebida') ? '🥤' :
+                            product.name.toLowerCase().includes('hamb') ? '🍔' : '🍽️'}
                       </div>
                       <div className="flex-1 min-w-0">
                         <h3 className="font-semibold text-base truncate">{product.name}</h3>
@@ -333,8 +333,8 @@ export default function LandingPage({
                         </div>
                       </div>
                     </div>
-                    <Button 
-                      size="sm" 
+                    <Button
+                      size="sm"
                       className="w-full mt-3 bg-gradient-to-r from-orange-500 to-red-500"
                       onClick={() => user ? onAddToCart(product) : onLoginClick()}
                     >
@@ -528,8 +528,8 @@ export default function LandingPage({
               <CardContent className="p-6 text-center">
                 <h3 className="text-xl font-bold mb-2">📦 Precisa enviar uma encomenda?</h3>
                 <p className="text-white/80 mb-4">Transporte ponto a ponto, rápido e seguro!</p>
-                <Button 
-                  size="lg" 
+                <Button
+                  size="lg"
                   className="bg-white text-blue-600 hover:bg-blue-100"
                   onClick={() => user ? onDeliveryRequest() : onLoginClick()}
                 >
@@ -575,9 +575,9 @@ export default function LandingPage({
               <h3 className="font-bold text-lg relative z-10">Primeira Entrega Grátis!</h3>
               <p className="text-sm text-white/80 mt-1 relative z-10">Cadastre-se agora e ganhe frete grátis.</p>
               {!user && (
-                <Button 
-                  size="sm" 
-                  className="mt-3 bg-white text-orange-500 hover:bg-orange-100 relative z-10" 
+                <Button
+                  size="sm"
+                  className="mt-3 bg-white text-orange-500 hover:bg-orange-100 relative z-10"
                   onClick={onLoginClick}
                 >
                   Criar Conta Grátis
@@ -598,8 +598,8 @@ export default function LandingPage({
                 <span className="bg-white/20 px-2 py-1 rounded">🏍️ Moto</span>
                 <span className="bg-white/20 px-2 py-1 rounded">🚗 Carro</span>
               </div>
-              <Button 
-                size="sm" 
+              <Button
+                size="sm"
                 className="mt-3 bg-white text-blue-600 hover:bg-blue-100 relative z-10 w-full"
               >
                 {user ? 'Solicitar Transporte' : 'Entrar para Solicitar'}
