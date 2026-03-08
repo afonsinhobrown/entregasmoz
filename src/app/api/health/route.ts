@@ -5,7 +5,7 @@ export async function GET() {
   try {
     // Testa conexão com banco
     await db.$queryRaw`SELECT 1`;
-    
+
     return NextResponse.json({
       status: 'ok',
       timestamp: new Date().toISOString(),
