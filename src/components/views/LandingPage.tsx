@@ -18,6 +18,7 @@ const TileLayer = dynamic(() => import('react-leaflet').then(mod => mod.TileLaye
 const CircleMarker = dynamic(() => import('react-leaflet').then(mod => mod.CircleMarker), { ssr: false })
 const Popup = dynamic(() => import('react-leaflet').then(mod => mod.Popup), { ssr: false })
 const Tooltip = dynamic(() => import('react-leaflet').then(mod => mod.Tooltip), { ssr: false })
+const Polyline = dynamic(() => import('react-leaflet').then(mod => mod.Polyline), { ssr: false })
 
 // Tipos
 type UserType = 'CLIENT' | 'DELIVERY_PERSON' | 'PROVIDER' | 'ADMIN'
@@ -114,6 +115,39 @@ export default function LandingPage({
     )
     return () => navigator.geolocation.clearWatch(watcher)
   }, [])
+
+  const distanceKm = (from: [number, number], to: [number, number]) => {
+    const [lat1, lon1] = from
+    const [lat2, lon2] = to
+    const toRad = (v: number) => (v * Math.PI) / 180
+    const R = 6371
+    const dLat = toRad(lat2 - lat1)
+    const dLon = toRad(lon2 - lon1)
+    const a =
+      Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+      Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) *
+      Math.sin(dLon / 2) * Math.sin(dLon / 2)
+    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a))
+    return R * c
+  }
+
+  const nearestProviders = getFilteredProviders()
+    .filter((p) => p.latitude && p.longitude)
+    .map((p) => ({
+      provider: p,
+      distance: distanceKm(mapCenter, [p.latitude as number, p.longitude as number]),
+    }))
+    .sort((a, b) => a.distance - b.distance)
+    .slice(0, 3)
+
+  const nearestDeliveryPersons = getSortedDeliveryPersons()
+    .filter((dp) => dp.currentLatitude && dp.currentLongitude)
+    .map((dp) => ({
+      dp,
+      distance: distanceKm(mapCenter, [dp.currentLatitude as number, dp.currentLongitude as number]),
+    }))
+    .sort((a, b) => a.distance - b.distance)
+    .slice(0, 3)
 
   // Filtrar produtos
   const getFilteredProducts = () => {
@@ -324,10 +358,13 @@ export default function LandingPage({
                     🗺️ Mapa de Maputo
                     <Badge className="bg-green-500 text-xs">Ao Vivo</Badge>
                   </h3>
-                  <p className="text-xs text-gray-500">Ruas, prestadores, entregadores e você</p>
+                  <p className="text-xs text-gray-500">
+                    {clientLocation ? 'GPS do navegador ativo' : 'Sem GPS do navegador - usando posição padrão'}
+                  </p>
                 </div>
 
                 <MapContainer
+                  key={`${mapCenter[0].toFixed(4)}-${mapCenter[1].toFixed(4)}`}
                   center={mapCenter}
                   zoom={13}
                   style={{ height: '100%', width: '100%' }}
@@ -352,9 +389,42 @@ export default function LandingPage({
                           </div>
                         </div>
                         {user?.client?.address && <p className="text-xs">📍 {user.client.address}</p>}
+                        <p className="text-xs text-blue-700 mt-1">
+                          {clientLocation ? 'Localização real do navegador (cliente)' : 'Localização estimada'}
+                        </p>
                       </div>
                     </Popup>
                   </CircleMarker>
+
+                  {nearestProviders.map(({ provider, distance }) => (
+                    <Polyline
+                      key={`line-provider-${provider.id}`}
+                      positions={[
+                        mapCenter,
+                        [provider.latitude as number, provider.longitude as number],
+                      ]}
+                      pathOptions={{ color: '#F97316', weight: 2, opacity: 0.6, dashArray: '6, 8' }}
+                    >
+                      <Tooltip sticky>
+                        <span className="text-xs">Até {provider.storeName}: {distance.toFixed(1)} km</span>
+                      </Tooltip>
+                    </Polyline>
+                  ))}
+
+                  {nearestDeliveryPersons.map(({ dp, distance }) => (
+                    <Polyline
+                      key={`line-delivery-${dp.id}`}
+                      positions={[
+                        mapCenter,
+                        [dp.currentLatitude as number, dp.currentLongitude as number],
+                      ]}
+                      pathOptions={{ color: '#10B981', weight: 2, opacity: 0.6, dashArray: '3, 7' }}
+                    >
+                      <Tooltip sticky>
+                        <span className="text-xs">Até {dp.user?.name || 'Entregador'}: {distance.toFixed(1)} km</span>
+                      </Tooltip>
+                    </Polyline>
+                  ))}
 
                   {getFilteredProviders().filter(p => p.latitude && p.longitude).map((provider) => (
                     <CircleMarker
