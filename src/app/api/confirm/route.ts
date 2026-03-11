@@ -1,5 +1,6 @@
 import { db } from '@/lib/db';
 import { NextRequest, NextResponse } from 'next/server';
+import { handleOrderDelivered } from '@/lib/order-notifications';
 
 // Confirmar via QR Code
 export async function POST(req: NextRequest) {
@@ -127,6 +128,18 @@ export async function POST(req: NextRequest) {
       where: { id: order.id },
       data: updateData,
     });
+
+    try {
+      if (type === 'DELIVERY' && order.provider && order.client) {
+        await handleOrderDelivered({
+          order: updatedOrder,
+          provider: order.provider,
+          client: order.client,
+        });
+      }
+    } catch (e) {
+      console.error('Falha ao enviar notificação de entrega:', e);
+    }
     
     // Criar registro de confirmação
     await db.orderConfirmation.create({

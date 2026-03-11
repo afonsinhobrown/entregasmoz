@@ -3484,8 +3484,8 @@ export default function Home() {
                       <div
                         key={dp.id}
                         className={`p-4 rounded-lg border-2 cursor-pointer transition-all ${selectedDeliveryPerson?.id === dp.id
-                            ? 'border-green-500 bg-green-50'
-                            : 'border-gray-200 hover:border-gray-300'
+                          ? 'border-green-500 bg-green-50'
+                          : 'border-gray-200 hover:border-gray-300'
                           }`}
                         onClick={() => setSelectedDeliveryPerson(dp)}
                       >

@@ -1,6 +1,7 @@
 import { db } from '@/lib/db';
 import { OrderStatus } from '@prisma/client';
 import { NextResponse } from 'next/server';
+import { handleOrderAssigned } from '@/lib/order-notifications';
 
 // Helper function to calculate distance between two points
 function calculateDistance(
@@ -92,7 +93,7 @@ export async function GET(request: Request) {
     });
 
     // Get delivery person's active deliveries
-    let activeDeliveries = [];
+    let activeDeliveries: any[] = [];
     if (deliveryPersonId) {
       activeDeliveries = await db.order.findMany({
         where: {
@@ -192,6 +193,7 @@ export async function POST(request: Request) {
       include: {
         provider: {
           select: {
+            id: true,
             storeName: true,
             address: true,
             latitude: true,
@@ -219,8 +221,29 @@ export async function POST(request: Request) {
             product: true,
           },
         },
+        deliveryPerson: {
+          include: {
+            user: {
+              select: {
+                name: true,
+              },
+            },
+          },
+        },
       },
     });
+
+    try {
+      if (updatedOrder.provider && updatedOrder.deliveryPerson) {
+        await handleOrderAssigned({
+          order: updatedOrder,
+          deliveryPerson: updatedOrder.deliveryPerson,
+          provider: updatedOrder.provider,
+        });
+      }
+    } catch (e) {
+      console.error('Falha ao enviar notificação de atribuição:', e);
+    }
 
     return NextResponse.json({ order: updatedOrder });
   } catch (error) {

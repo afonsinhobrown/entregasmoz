@@ -2,6 +2,7 @@ import { db } from '@/lib/db';
 import { OrderStatus, PaymentMethod } from '@prisma/client';
 import { NextResponse } from 'next/server';
 import { randomBytes } from 'crypto';
+import { handleNewOrder, handleOrderReady, handleOrderDelivered } from '@/lib/order-notifications';
 
 // Gerar QR Code para pedido
 function generateOrderQRCode(orderId: string): string {
@@ -244,7 +245,7 @@ export async function POST(request: Request) {
 
     // Calculate total
     let totalAmount = 0;
-    const orderItems = [];
+    const orderItems: any[] = [];
 
     for (const item of items) {
       const product = await db.product.findUnique({
@@ -304,10 +305,27 @@ export async function POST(request: Request) {
           },
         },
         provider: {
-          select: { storeName: true, address: true },
+          select: { id: true, storeName: true, address: true },
+        },
+        client: {
+          include: {
+            user: { select: { name: true } },
+          },
         },
       },
     });
+
+    try {
+      if (order.provider) {
+        await handleNewOrder({
+          order,
+          provider: order.provider,
+          client: { name: order.client?.user?.name || 'Cliente' },
+        });
+      }
+    } catch (e) {
+      console.error('Falha ao enviar notificação de novo pedido:', e);
+    }
 
     return NextResponse.json({ order });
   } catch (error) {
@@ -388,6 +406,26 @@ export async function PATCH(request: Request) {
           },
         },
       });
+    }
+
+    // Trigger notifications
+    try {
+      if (status === OrderStatus.READY && order.deliveryPerson) {
+        await handleOrderReady({
+          order,
+          deliveryPerson: order.deliveryPerson,
+        });
+      }
+
+      if (status === OrderStatus.DELIVERED && order.provider && order.client) {
+        await handleOrderDelivered({
+          order,
+          provider: order.provider,
+          client: order.client,
+        });
+      }
+    } catch (e) {
+      console.error('Falha ao enviar notificação de atualização de pedido:', e);
     }
 
     return NextResponse.json({ order });

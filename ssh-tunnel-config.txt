@@ -1,0 +1,8 @@
+# Configuração SSH Tunnel para Neon (mais segura que split tunneling)
+# 1. Instalar OpenSSH se não tiver: winget install Microsoft.OpenSSH.Beta
+# 2. Configurar tunnel:
+# ssh -L 5433:ep-raspy-mode-agdi8d9m.c-2.eu-central-1.aws.neon.tech:5432 -N user@your-server
+
+# DATABASE_URL="postgresql://neondb_owner:npg_4LY2caWCfsHM@localhost:5433/entregasmoz?sslmode=require"
+
+# Ou usar um VPS gratuito como Oracle Always Free ou AWS Lightsail
